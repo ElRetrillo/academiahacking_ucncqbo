@@ -45,7 +45,50 @@ RUN ARCH=$(uname -m) && \
 RUN echo '<!DOCTYPE html><html><head><title>Login - SecureCorp</title></head><body><h1>SecureCorp Login Portal</h1><form method="post" action="/login"><input type="text" name="user" placeholder="Username"><input type="password" name="pass" placeholder="Password"><button type="submit">Login</button></form><!-- TODO: remove before deploy --><!-- admin credentials: admin / s3cur3p4ss --><!-- flag: EclipSec{h1dd3n_1n_pl41n_s1ght} --></body></html>' > /var/www/html/index.html
 
 # ── Script de arranque ────────────────────────────────────────────
-RUN printf '#!/bin/bash\nset -e\ncat <<EOF > /etc/nginx/sites-available/default\nserver {\n    listen 80 default_server;\n    listen [::]:80 default_server;\n    root /var/www/html;\n    index index.html;\n    server_name _;\n\n    location / {\n        try_files \$uri \$uri/ =404;\n    }\n\n    # Proxy para ttyd (WebSocket)\n    location /ws/ {\n        proxy_pass http://127.0.0.1:7681/;\n        proxy_http_version 1.1;\n        proxy_set_header Upgrade \$http_upgrade;\n        proxy_set_header Connection "upgrade";\n        proxy_set_header Host \$host;\n    }\n}\nEOF\n\n# Iniciar nginx en background\nnginx -g "daemon off;" &\n\n# Iniciar ttyd en foreground\nexec ttyd \\\n    --port 7681 \\\n    --writable \\\n    --cwd /root \\\n    -t title="CTF Shell" \\\n    --base-path /ws \\\n    bash\n' > /start.sh && chmod +x /start.sh
+RUN cat > /start.sh << 'STARTSCRIPT'
+#!/bin/bash
+set -e
+
+# Create nginx config
+cat > /etc/nginx/sites-available/default << 'NGINXCONF'
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+    root /var/www/html;
+    index index.html;
+    server_name _;
+
+    location / {
+        try_files $uri $uri/ =404;
+    }
+
+    # Proxy para ttyd (WebSocket)
+    location /ws/ {
+        proxy_pass http://127.0.0.1:7681/;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+    }
+}
+NGINXCONF
+
+# Verify nginx config is valid before starting
+nginx -t
+
+# Start ttyd in background
+ttyd \
+    --port 7681 \
+    --writable \
+    --cwd /root \
+    -t title="CTF Shell" \
+    --base-path /ws \
+    bash &
+
+# Start nginx in foreground (becomes PID 1 / main process)
+exec nginx -g "daemon off;"
+STARTSCRIPT
+RUN chmod +x /start.sh
 
 # ── Archivo de flag dentro del contenedor ─────────────────────────
 RUN echo 'EclipSec{h1dd3n_1n_pl41n_s1ght}' > /flag.txt && chmod 644 /flag.txt
