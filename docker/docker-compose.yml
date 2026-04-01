@@ -29,16 +29,19 @@ services:
   # ──────────────────────────────────────────────────────────────
   # misc-001: Base64 Layers (EASY - MISC / NC)
   # ──────────────────────────────────────────────────────────────
-  misc-001:
-    image: your-misc-challenge-image
-    container_name: ctf-misc-001
-    restart: unless-stopped
-    ports:
-      - "8003:9001" # nc service
-      - "7683:7681" # ttyd
-    networks:
-      - ctf-net
+  # misc-001:
+  #   image: your-misc-challenge-image
+  #   container_name: ctf-misc-001
+  #   restart: unless-stopped
+  #   ports:
+  #     - "8003:9001"   # nc service
+  #     - "7683:7681"   # ttyd
+  #   networks:
+  #     - ctf-net
+
+  # ──────────────────────────────────────────────────────────────
   # Agrega más retos aquí siguiendo el mismo patrón
+  # ──────────────────────────────────────────────────────────────
 
 networks:
   ctf-net:

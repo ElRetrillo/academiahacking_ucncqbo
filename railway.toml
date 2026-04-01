@@ -1,0 +1,3 @@
+[build]
+builder = "docker"
+dockerfilePath = "docker/challenge-web-001/Dockerfile"

@@ -45,8 +45,34 @@ RUN echo '<!DOCTYPE html><html><head><title>Login - SecureCorp</title></head><bo
 # ── Script de arranque ────────────────────────────────────────────
 RUN printf '#!/bin/bash\n\
 set -e\n\
+# Configurar nginx para usar $PORT (Railway) o 80 por defecto\n\
+PORT="${PORT:-80}"\n\
+cat <<EOF > /etc/nginx/sites-available/default\n\
+server {\n\
+    listen ${PORT} default_server;\n\
+    listen [::]:${PORT} default_server;\n\
+    root /var/www/html;\n\
+    index index.html;\n\
+    server_name _;\n\
+\n\
+    location / {\n\
+        try_files \\$uri \\$uri/ =404;\n\
+    }\n\
+\n\
+    # Proxy para ttyd (WebSocket)\n\
+    location /ws/ {\n\
+        proxy_pass http://127.0.0.1:7681/;\n\
+        proxy_http_version 1.1;\n\
+        proxy_set_header Upgrade \\$http_upgrade;\n\
+        proxy_set_header Connection "upgrade";\n\
+        proxy_set_header Host \\$host;\n\
+    }\n\
+}\n\
+EOF\n\
+\n\
 # Iniciar nginx en background\n\
 nginx -g "daemon off;" &\n\
+\n\
 # Iniciar ttyd en foreground\n\
 exec ttyd \\\n\
     --port 7681 \\\n\
@@ -54,6 +80,7 @@ exec ttyd \\\n\
     --once=false \\\n\
     --cwd /root \\\n\
     --title "CTF Shell" \\\n\
+    --base-path /ws \\\n\
     bash\n' > /start.sh && chmod +x /start.sh
 
 # ── Archivo de flag dentro del contenedor ─────────────────────────
