@@ -1,0 +1,45 @@
+# ================================================================
+# docker-compose para levantar todos los retos CTF de EclipSec
+#
+# Uso:
+#   docker compose up -d         
+#   docker compose ps             
+#   docker compose logs web-001  
+#   docker compose down          
+#
+# Configuración de puertos:
+#   <puerto_externo>:<puerto_interno>
+#   El puerto externo es el que configuras en challenges.ts
+# ================================================================
+
+services:
+
+  # ──────────────────────────────────────────────────────────────
+  # web-001: Hidden in Plain Sight (EASY - WEB)
+  # ──────────────────────────────────────────────────────────────
+  web-001:
+    build: ./challenge-web-001
+    container_name: ctf-web-001
+    restart: unless-stopped
+    ports:
+      - "8001:80" # web app  →  challenges.ts: port: 8001
+      - "7681:7681" # ttyd     →  challenges.ts: wsPort: 7681
+    networks:
+      - ctf-net
+  # ──────────────────────────────────────────────────────────────
+  # misc-001: Base64 Layers (EASY - MISC / NC)
+  # ──────────────────────────────────────────────────────────────
+  misc-001:
+    image: your-misc-challenge-image
+    container_name: ctf-misc-001
+    restart: unless-stopped
+    ports:
+      - "8003:9001" # nc service
+      - "7683:7681" # ttyd
+    networks:
+      - ctf-net
+  # Agrega más retos aquí siguiendo el mismo patrón
+
+networks:
+  ctf-net:
+    driver: bridge
