@@ -28,8 +28,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     bash \
     procps \
     net-tools \
-    ttyd \
     && rm -rf /var/lib/apt/lists/*
+
+# ── Instalar ttyd (terminal web) 1.7.4 dependiendo de arquitectura ─
+RUN ARCH=$(uname -m) && \
+    if [ "$ARCH" = "x86_64" ]; then TTYD_ARCH="x86_64"; \
+    elif [ "$ARCH" = "aarch64" ]; then TTYD_ARCH="aarch64"; \
+    else echo "Unsupported architecture: $ARCH" && exit 1; fi && \
+    curl -sSL "https://github.com/tsl0922/ttyd/releases/download/1.7.4/ttyd.${TTYD_ARCH}" \
+        -o /usr/local/bin/ttyd && \
+    chmod +x /usr/local/bin/ttyd
 
 
 # ── Contenido web del reto ────────────────────────────────────────
@@ -71,9 +79,8 @@ nginx -g "daemon off;" &\n\
 exec ttyd \\\n\
     --port 7681 \\\n\
     --writable \\\n\
-    --once=false \\\n\
     --cwd /root \\\n\
-    --title "CTF Shell" \\\n\
+    -t title="CTF Shell" \\\n\
     --base-path /ws \\\n\
     bash\n' > /start.sh && chmod +x /start.sh
 
