@@ -19,7 +19,7 @@ FROM ubuntu:22.04
 # Evitar prompts interactivos
 ENV DEBIAN_FRONTEND=noninteractive
 
-# ── Herramientas base ────────────────────────────────────────────
+# ── Herramientas base y ttyd ─────────────────────────────────────
 RUN apt-get update && apt-get install -y --no-install-recommends \
     nginx \
     curl \
@@ -28,15 +28,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     bash \
     procps \
     net-tools \
+    ttyd \
     && rm -rf /var/lib/apt/lists/*
 
-# ── Instalar ttyd (terminal web) ─────────────────────────────────
-# Descarga el binario precompilado de la release oficial
-RUN TTYD_VERSION=$(curl -s https://api.github.com/repos/tsl0922/ttyd/releases/latest \
-        | grep tag_name | cut -d'"' -f4) && \
-    curl -sSL "https://github.com/tsl0922/ttyd/releases/download/${TTYD_VERSION}/ttyd.x86_64" \
-        -o /usr/local/bin/ttyd && \
-    chmod +x /usr/local/bin/ttyd
 
 # ── Contenido web del reto ────────────────────────────────────────
 # Aquí va tu app vulnerable. Ejemplo simple con flag en comentario HTML:
