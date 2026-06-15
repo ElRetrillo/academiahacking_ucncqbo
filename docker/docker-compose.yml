@@ -24,6 +24,134 @@ services:
     ports:
       - "8001:80" # web app  →  challenges.ts: port: 8001
       - "7681:7681" # ttyd     →  challenges.ts: wsPort: 7681
+    
+  # ──────────────────────────────────────────────────────────────
+  # web-002: Robots & Crawlers (EASY - WEB)
+  # ──────────────────────────────────────────────────────────────
+  web-002:
+    build: ./challenge-web-002
+    container_name: ctf-web-002
+    restart: unless-stopped
+    ports:
+      - "8002:80"
+      - "7682:7681"
+    networks:
+      - ctf-net
+
+  # ──────────────────────────────────────────────────────────────
+  # web-003: Cookie Tampering (EASY - WEB)
+  # ──────────────────────────────────────────────────────────────
+  web-003:
+    build: ./challenge-web-003
+    container_name: ctf-web-003
+    restart: unless-stopped
+    ports:
+      - "8003:80"
+      - "7683:7681"
+    networks:
+      - ctf-net
+
+  # ──────────────────────────────────────────────────────────────
+  # web-004: Ping of Death (MEDIUM - WEB)
+  # ──────────────────────────────────────────────────────────────
+  web-004:
+    build: ./challenge-web-004
+    container_name: ctf-web-004
+    restart: unless-stopped
+    ports:
+      - "8004:80"
+      - "7684:7681"
+    networks:
+      - ctf-net
+
+  # ──────────────────────────────────────────────────────────────
+  # web-005: LFI to RCE (MEDIUM - WEB)
+  # ──────────────────────────────────────────────────────────────
+  web-005:
+    build: ./challenge-web-005
+    container_name: ctf-web-005
+    restart: unless-stopped
+    ports:
+      - "8005:80"
+      - "7685:7681"
+    networks:
+      - ctf-net
+
+  # ──────────────────────────────────────────────────────────────
+  # web-006: SQLi Login Bypass (MEDIUM - WEB)
+  # ──────────────────────────────────────────────────────────────
+  web-006:
+    build: ./challenge-web-006
+    container_name: ctf-web-006
+    restart: unless-stopped
+    ports:
+      - "8006:80"
+      - "7686:7681"
+    networks:
+      - ctf-net
+
+  # ──────────────────────────────────────────────────────────────
+  # web-007: IDOR Profiles (MEDIUM - WEB)
+  # ──────────────────────────────────────────────────────────────
+  web-007:
+    build: ./challenge-web-007
+    container_name: ctf-web-007
+    restart: unless-stopped
+    ports:
+      - "8007:80"
+      - "7687:7681"
+    networks:
+      - ctf-net
+
+  # ──────────────────────────────────────────────────────────────
+  # web-008: Server-Side Template Injection (HARD - WEB)
+  # ──────────────────────────────────────────────────────────────
+  web-008:
+    build: ./challenge-web-008
+    container_name: ctf-web-008
+    restart: unless-stopped
+    ports:
+      - "8008:80"
+      - "7688:7681"
+    networks:
+      - ctf-net
+
+  # ──────────────────────────────────────────────────────────────
+  # web-009: Source Code Leak (EASY - WEB)
+  # ──────────────────────────────────────────────────────────────
+  web-009:
+    build: ./challenge-web-009
+    container_name: ctf-web-009
+    restart: unless-stopped
+    ports:
+      - "8009:80"
+      - "7689:7681"
+    networks:
+      - ctf-net
+
+  # ──────────────────────────────────────────────────────────────
+  # web-010: Headers Matter (MEDIUM - WEB)
+  # ──────────────────────────────────────────────────────────────
+  web-010:
+    build: ./challenge-web-010
+    container_name: ctf-web-010
+    restart: unless-stopped
+    ports:
+      - "8010:80"
+      - "7690:7681"
+    networks:
+      - ctf-net
+
+  # ──────────────────────────────────────────────────────────────
+  # web-011: Command Execution GET (HARD - WEB)
+  # ──────────────────────────────────────────────────────────────
+  web-011:
+    build: ./challenge-web-011
+    container_name: ctf-web-011
+    restart: unless-stopped
+    ports:
+      - "8011:80"
+      - "7691:7681"
     networks:
       - ctf-net
   # ──────────────────────────────────────────────────────────────
