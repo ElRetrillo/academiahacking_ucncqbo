@@ -1,0 +1,18 @@
+import os
+from flask import Flask, request
+app = Flask(__name__)
+
+@app.route('/')
+def index():
+    file = request.args.get('file', 'home.txt')
+    try:
+        # VULNERABLE
+        content = open(file).read()
+    except:
+        content = 'File not found'
+    return f'<html><body style="background:#1a1a2e;color:#e94560;font-family:sans-serif;text-align:center;padding:50px;"><h1>LFI Challenge</h1><p><a href="?file=home.txt" style="color:white;">Home</a></p><pre style="text-align:left; background:#0f3460; padding:20px; color:white;">{content}</pre></body></html>'
+
+if __name__ == '__main__':
+    with open('home.txt', 'w') as f: f.write('Welcome to the home page.')
+    with open('/flag_web005.txt', 'w') as f: f.write('EclipSec{l0c4l_f1l3_1nclus10n_m4st3r}')
+    app.run(host='127.0.0.1', port=8005)

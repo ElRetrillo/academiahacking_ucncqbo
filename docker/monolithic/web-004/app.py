@@ -24,5 +24,5 @@ def index():
     return render_template_string(template, output=output)
 
 if __name__ == '__main__':
-    with open('/flag.txt', 'w') as f: f.write('EclipSec{p1ng_0f_d34th_cmdi}')
-    app.run(host='127.0.0.1', port=8000)
+    with open('/flag_web004.txt', 'w') as f: f.write('EclipSec{p1ng_0f_d34th_cmdi}')
+    app.run(host='127.0.0.1', port=8004)
