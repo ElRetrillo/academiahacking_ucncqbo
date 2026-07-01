@@ -36,6 +36,11 @@ RUN ARCH=$(uname -m) && \
 RUN mkdir -p /app
 COPY app.py /app/app.py
 
+# Create challenge files at build time (not at runtime) so they are
+# always available regardless of how the Python process starts.
+RUN echo 'Welcome to the home page.' > /app/home.txt
+RUN echo 'EclipSec{l0c4l_f1l3_1nclus10n_m4st3r}' > /flag.txt
+
 # Nginx
 RUN cat > /start.sh << 'STARTSCRIPT'
 #!/bin/bash
