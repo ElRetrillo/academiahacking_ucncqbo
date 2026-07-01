@@ -26,8 +26,9 @@ RUN chmod +x /app/start.sh
 # Web-005 files setup
 RUN echo 'Welcome to the home page.' > /app/web-005/home.txt
 
-# Web-005 and Web-011 flag files
-RUN echo 'EclipSec{l0c4l_f1l3_1nclus10n_m4st3r}' > /flag_web005.txt && \
+# Web-005: flag available as absolute path /flag.txt AND relative flag.txt from CWD
+RUN echo 'EclipSec{l0c4l_f1l3_1nclus10n_m4st3r}' > /flag.txt && \
+    cp /flag.txt /app/web-005/flag.txt && \
     echo 'EclipSec{c0mm4nd_3x3cut10n_v1a_g3t}' > /flag_web011.txt
 
 EXPOSE 80
