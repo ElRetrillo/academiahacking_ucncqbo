@@ -10,7 +10,7 @@ def index():
     </body></html>
     '''
 
-@app.route('/index.py.bak')
+@app.route('/index.bak')
 def bak():
     return '''
 # Backup file
