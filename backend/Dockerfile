@@ -11,7 +11,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Build context is repo root, so use backend/ prefix
 COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
@@ -19,5 +18,5 @@ COPY backend/ .
 
 EXPOSE 8000
 
-# Run seed then start — if seed fails, app still starts
-CMD ["sh", "-c", "python seed.py; uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+# Start directly. Tables are auto-created by main.py lifespan.
+CMD uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}
