@@ -3,7 +3,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.database import init_db
-from app.api.v1 import api_v1_router
+from app.api.v1 import api_v1_router, ctf_academy_router
 
 
 @asynccontextmanager
@@ -38,6 +38,9 @@ app.add_middleware(
 
 # Include API v1 routes
 app.include_router(api_v1_router)
+
+# Include CTF Academy adapter — mounted at root to match EclipSec frontend contract (/api/ctf-academy)
+app.include_router(ctf_academy_router)
 
 
 @app.get("/", tags=["Health"])
