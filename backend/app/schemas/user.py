@@ -51,10 +51,13 @@ class UserProfileSolvesBreakdown(BaseModel):
 
 class RecentSolveDetail(BaseModel):
     challenge_title: str
+    challengeTitle: Optional[str] = None
     category: str
     difficulty: str
     points_awarded: int
+    pointsAwarded: Optional[int] = None
     solved_at: datetime
+    solvedAt: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -67,12 +70,20 @@ class UserProfileDetail(BaseModel):
     role: str
     score: int
     global_rank: Optional[int] = None
+    globalRank: Optional[int] = None
     rank_name: str
+    rankName: Optional[str] = None
     created_at: datetime
+    createdAt: Optional[datetime] = None
     last_connected_at: datetime
+    lastConnectedAt: Optional[datetime] = None
     is_active: bool
+    isActive: Optional[bool] = None
     solves_count: int
-    solves_by_category: list[UserProfileSolvesBreakdown]
-    recent_solves: list[RecentSolveDetail]
+    solvesCount: Optional[int] = None
+    solves_by_category: list[UserProfileSolvesBreakdown] = Field(default_factory=list)
+    solvesByCategory: list[UserProfileSolvesBreakdown] = Field(default_factory=list)
+    recent_solves: list[RecentSolveDetail] = Field(default_factory=list)
+    recentSolves: list[RecentSolveDetail] = Field(default_factory=list)
 
     model_config = ConfigDict(from_attributes=True)
