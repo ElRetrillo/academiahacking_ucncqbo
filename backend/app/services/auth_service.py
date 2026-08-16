@@ -30,12 +30,18 @@ class AuthService:
                 detail="Email is already registered."
             )
 
+        # Assign "admin" to the first user, and "user" to everyone else
+        count_query = select(func.count()).select_from(User)
+        count_res = await db.execute(count_query)
+        user_count = count_res.scalar() or 0
+        role = "admin" if user_count == 0 else "user"
+
         new_user = User(
             username=req.username,
             email=req.email,
             hashed_password=hash_password(req.password),
             nationality=req.nationality.upper(),
-            role="user",
+            role=role,
             score=0,
             is_active=True,
             created_at=datetime.now(timezone.utc),

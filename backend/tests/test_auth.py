@@ -63,3 +63,26 @@ async def test_update_profile(client: AsyncClient, user_token: str):
     resp = await client.put("/api/v1/auth/me", json=update_payload, headers=headers)
     assert resp.status_code == 200
     assert resp.json()["nationality"] == "PE"
+
+
+@pytest.mark.asyncio
+async def test_first_user_is_admin_subsequent_is_user(client: AsyncClient):
+    # Register 1st user
+    r1 = await client.post("/api/v1/auth/register", json={
+        "username": "first_hacker",
+        "email": "first@eclipsec.cl",
+        "password": "password123",
+        "nationality": "CL"
+    })
+    assert r1.status_code == 201
+    assert r1.json()["role"] == "admin"
+
+    # Register 2nd user
+    r2 = await client.post("/api/v1/auth/register", json={
+        "username": "second_hacker",
+        "email": "second@eclipsec.cl",
+        "password": "password123",
+        "nationality": "AR"
+    })
+    assert r2.status_code == 201
+    assert r2.json()["role"] == "user"
