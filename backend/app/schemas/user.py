@@ -40,3 +40,39 @@ class UserAdminUpdate(BaseModel):
     is_active: Optional[bool] = None
     nationality: Optional[str] = None
     score: Optional[int] = None
+
+
+class UserProfileSolvesBreakdown(BaseModel):
+    category: str
+    count: int
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class RecentSolveDetail(BaseModel):
+    challenge_title: str
+    category: str
+    difficulty: str
+    points_awarded: int
+    solved_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class UserProfileDetail(BaseModel):
+    id: str
+    username: str
+    email: EmailStr
+    nationality: str
+    role: str
+    score: int
+    global_rank: Optional[int] = None
+    rank_name: str
+    created_at: datetime
+    last_connected_at: datetime
+    is_active: bool
+    solves_count: int
+    solves_by_category: list[UserProfileSolvesBreakdown]
+    recent_solves: list[RecentSolveDetail]
+
+    model_config = ConfigDict(from_attributes=True)
