@@ -13,7 +13,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import func, select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -23,6 +23,7 @@ from app.models.user import User
 from app.schemas.auth import LoginRequest, RegisterRequest
 from app.services.auth_service import AuthService
 from app.services.challenge_service import ChallengeService
+from app.services.user_service import UserService
 from app.services.security import decode_token, create_access_token
 
 router = APIRouter(tags=["CTF Academy"])
@@ -115,17 +116,56 @@ async def build_academy_state(db: AsyncSession, user: Optional[User]) -> dict:
         if total_challenges > 0 and len(completed_ids) >= total_challenges and solves:
             completed_at_ts = int(solves[-1].solved_at.timestamp() * 1000)
 
+        # Compute Global Leaderboard Rank (only for players with role == "user")
+        global_rank = None
+        if user.role == "user":
+            solve_stats_subquery = (
+                select(
+                    Solve.user_id,
+                    func.max(Solve.solved_at).label("last_solve_at"),
+                )
+                .group_by(Solve.user_id)
+                .subquery()
+            )
+            
+            rank_query = (
+                select(User.id)
+                .outerjoin(solve_stats_subquery, User.id == solve_stats_subquery.c.user_id)
+                .where(User.is_active == True, User.role == "user")
+                .order_by(
+                    desc(User.score),
+                    solve_stats_subquery.c.last_solve_at.asc().nulls_last(),
+                    User.created_at.asc(),
+                )
+            )
+            
+            rank_res = await db.execute(rank_query)
+            all_user_ids = [row[0] for row in rank_res.all()]
+            try:
+                global_rank = all_user_ids.index(user.id) + 1
+            except ValueError:
+                global_rank = None
+
+        rank_name = UserService.get_rank_name(user.score)
+
         current_user_data = {
+            "id": user.id,
             "username": user.username,
+            "role": user.role,
+            "nationality": user.nationality,
+            "score": user.score,
+            "rankName": rank_name,
+            "globalRank": global_rank,
             "createdAt": int(user.created_at.timestamp() * 1000),
             "startedAt": int(user.created_at.timestamp() * 1000),
             "completedChallengeIds": completed_ids,
             "completionTimes": completion_times,
+            "solvesCount": len(completed_ids),
             **({"completedAt": completed_at_ts} if completed_at_ts else {}),
         }
         session_data = {
             "username": user.username,
-            "role": "admin" if user.role == "admin" else "player",
+            "role": user.role,
         }
 
     return {

@@ -146,27 +146,27 @@ async def seed():
     await init_db()
 
     async with AsyncSessionLocal() as db:
-        # 1. Seed Admin User
-        admin_res = await db.execute(select(User).where(User.username == settings.ADMIN_USERNAME))
-        admin = admin_res.scalar_one_or_none()
-        if not admin:
-            print(f"Creating default admin account: {settings.ADMIN_USERNAME} ({settings.ADMIN_EMAIL})")
-            admin = User(
-                username=settings.ADMIN_USERNAME,
-                email=settings.ADMIN_EMAIL,
-                hashed_password=hash_password(settings.ADMIN_PASSWORD),
-                role="admin",
-                nationality="CL",
-                score=0,
-                is_active=True,
-                created_at=datetime.now(timezone.utc),
-                last_connected_at=datetime.now(timezone.utc),
-            )
-            db.add(admin)
-            await db.commit()
-            print("✓ Admin user created.")
-        else:
-            print("✓ Admin user already exists.")
+        # 1. Seed Admin User (Disabled: first registered user becomes admin)
+        # admin_res = await db.execute(select(User).where(User.username == settings.ADMIN_USERNAME))
+        # admin = admin_res.scalar_one_or_none()
+        # if not admin:
+        #     print(f"Creating default admin account: {settings.ADMIN_USERNAME} ({settings.ADMIN_EMAIL})")
+        #     admin = User(
+        #         username=settings.ADMIN_USERNAME,
+        #         email=settings.ADMIN_EMAIL,
+        #         hashed_password=hash_password(settings.ADMIN_PASSWORD),
+        #         role="admin",
+        #         nationality="CL",
+        #         score=0,
+        #         is_active=True,
+        #         created_at=datetime.now(timezone.utc),
+        #         last_connected_at=datetime.now(timezone.utc),
+        #     )
+        #     db.add(admin)
+        #     await db.commit()
+        #     print("✓ Admin user created.")
+        # else:
+        #     print("✓ Admin user already exists.")
 
         # 2. Seed Challenges
         print("Seeding CTF challenges...")
@@ -195,71 +195,71 @@ async def seed():
                 print(f"  ✓ Challenge {ch_data['slug']} already exists.")
         await db.commit()
 
-        # 3. Seed Demo Users & some initial solves for leaderboard demonstration
-        print("Seeding demo players...")
-        created_users = []
-        for user_data in DEMO_USERS:
-            res = await db.execute(select(User).where(User.username == user_data["username"]))
-            existing_u = res.scalar_one_or_none()
-            if not existing_u:
-                u = User(
-                    username=user_data["username"],
-                    email=user_data["email"],
-                    hashed_password=hash_password(user_data["password"]),
-                    nationality=user_data["nationality"],
-                    role="user",
-                    score=0,
-                    is_active=True,
-                    created_at=datetime.now(timezone.utc),
-                    last_connected_at=datetime.now(timezone.utc),
-                )
-                db.add(u)
-                await db.commit()
-                await db.refresh(u)
-                created_users.append(u)
-                print(f"  + Added demo player: {u.username} [{u.nationality}]")
-            else:
-                created_users.append(existing_u)
-
-        # 4. Simulate a few initial solves for demo users
-        web_001_res = await db.execute(select(Challenge).where(Challenge.slug == "web-001"))
-        web_001 = web_001_res.scalar_one_or_none()
-        web_002_res = await db.execute(select(Challenge).where(Challenge.slug == "web-002"))
-        web_002 = web_002_res.scalar_one_or_none()
-
-        if web_001 and created_users:
-            for player in created_users[:3]:
-                solve_check = await db.execute(
-                    select(Solve).where(Solve.user_id == player.id, Solve.challenge_id == web_001.id)
-                )
-                if not solve_check.scalar_one_or_none():
-                    solve = Solve(
-                        user_id=player.id,
-                        challenge_id=web_001.id,
-                        points_awarded=web_001.points,
-                        solved_at=datetime.now(timezone.utc),
-                    )
-                    db.add(solve)
-                    player.score += web_001.points
-                    web_001.solves_count += 1
-            await db.commit()
-
-        if web_002 and len(created_users) >= 2:
-            top_player = created_users[0]
-            solve_check = await db.execute(
-                select(Solve).where(Solve.user_id == top_player.id, Solve.challenge_id == web_002.id)
-            )
-            if not solve_check.scalar_one_or_none():
-                solve = Solve(
-                    user_id=top_player.id,
-                    challenge_id=web_002.id,
-                    points_awarded=web_002.points,
-                    solved_at=datetime.now(timezone.utc),
-                )
-                db.add(solve)
-                top_player.score += web_002.points
-                web_002.solves_count += 1
-            await db.commit()
+        # 3. Seed Demo Users (Disabled: database starts with 0 users)
+        # print("Seeding demo players...")
+        # created_users = []
+        # for user_data in DEMO_USERS:
+        #     res = await db.execute(select(User).where(User.username == user_data["username"]))
+        #     existing_u = res.scalar_one_or_none()
+        #     if not existing_u:
+        #         u = User(
+        #             username=user_data["username"],
+        #             email=user_data["email"],
+        #             hashed_password=hash_password(user_data["password"]),
+        #             nationality=user_data["nationality"],
+        #             role="user",
+        #             score=0,
+        #             is_active=True,
+        #             created_at=datetime.now(timezone.utc),
+        #             last_connected_at=datetime.now(timezone.utc),
+        #         )
+        #         db.add(u)
+        #         await db.commit()
+        #         await db.refresh(u)
+        #         created_users.append(u)
+        #         print(f"  + Added demo player: {u.username} [{u.nationality}]")
+        #     else:
+        #         created_users.append(existing_u)
+        #
+        # # 4. Simulate a few initial solves for demo users
+        # web_001_res = await db.execute(select(Challenge).where(Challenge.slug == "web-001"))
+        # web_001 = web_001_res.scalar_one_or_none()
+        # web_002_res = await db.execute(select(Challenge).where(Challenge.slug == "web-002"))
+        # web_002 = web_002_res.scalar_one_or_none()
+        #
+        # if web_001 and created_users:
+        #     for player in created_users[:3]:
+        #         solve_check = await db.execute(
+        #             select(Solve).where(Solve.user_id == player.id, Solve.challenge_id == web_001.id)
+        #         )
+        #         if not solve_check.scalar_one_or_none():
+        #             solve = Solve(
+        #                 user_id=player.id,
+        #                 challenge_id=web_001.id,
+        #                 points_awarded=web_001.points,
+        #                 solved_at=datetime.now(timezone.utc),
+        #             )
+        #             db.add(solve)
+        #             player.score += web_001.points
+        #             web_001.solves_count += 1
+        #     await db.commit()
+        #
+        # if web_002 and len(created_users) >= 2:
+        #     top_player = created_users[0]
+        #     solve_check = await db.execute(
+        #         select(Solve).where(Solve.user_id == top_player.id, Solve.challenge_id == web_002.id)
+        #     )
+        #     if not solve_check.scalar_one_or_none():
+        #         solve = Solve(
+        #             user_id=top_player.id,
+        #             challenge_id=web_002.id,
+        #             points_awarded=web_002.points,
+        #             solved_at=datetime.now(timezone.utc),
+        #         )
+        #         db.add(solve)
+        #         top_player.score += web_002.points
+        #         web_002.solves_count += 1
+        #     await db.commit()
 
         print("Seeding completed successfully!")
 
