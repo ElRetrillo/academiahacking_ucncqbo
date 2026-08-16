@@ -110,10 +110,13 @@ class UserService:
         recent_solves = [
             RecentSolveDetail(
                 challenge_title=row.title,
+                challengeTitle=row.title,
                 category=row.category,
                 difficulty=row.difficulty,
                 points_awarded=row.points_awarded,
+                pointsAwarded=row.points_awarded,
                 solved_at=row.solved_at,
+                solvedAt=row.solved_at,
             )
             for row in recent_solves_res.all()
         ]
@@ -126,11 +129,19 @@ class UserService:
             role=user.role,
             score=user.score,
             global_rank=global_rank,
+            globalRank=global_rank,
             rank_name=rank_name,
+            rankName=rank_name,
             created_at=user.created_at,
+            createdAt=user.created_at,
             last_connected_at=user.last_connected_at,
+            lastConnectedAt=user.last_connected_at,
             is_active=user.is_active,
+            isActive=user.is_active,
             solves_count=solves_count,
+            solvesCount=solves_count,
             solves_by_category=solves_by_category,
+            solvesByCategory=solves_by_category,
             recent_solves=recent_solves,
+            recentSolves=recent_solves,
         )
