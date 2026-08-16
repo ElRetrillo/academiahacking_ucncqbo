@@ -151,21 +151,33 @@ async def build_academy_state(db: AsyncSession, user: Optional[User]) -> dict:
         current_user_data = {
             "id": user.id,
             "username": user.username,
+            "email": user.email,
             "role": user.role,
             "nationality": user.nationality,
             "score": user.score,
             "rankName": rank_name,
+            "rank_name": rank_name,
             "globalRank": global_rank,
+            "global_rank": global_rank,
             "createdAt": int(user.created_at.timestamp() * 1000),
+            "created_at": int(user.created_at.timestamp() * 1000),
             "startedAt": int(user.created_at.timestamp() * 1000),
             "completedChallengeIds": completed_ids,
             "completionTimes": completion_times,
             "solvesCount": len(completed_ids),
+            "solves_count": len(completed_ids),
             **({"completedAt": completed_at_ts} if completed_at_ts else {}),
         }
         session_data = {
+            "id": user.id,
             "username": user.username,
+            "email": user.email,
             "role": user.role,
+            "nationality": user.nationality,
+            "score": user.score,
+            "isLoggedIn": True,
+            "is_logged_in": True,
+            "user": current_user_data,
         }
 
     return {
