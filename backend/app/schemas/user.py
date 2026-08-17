@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Union
 from pydantic import BaseModel, EmailStr, Field, ConfigDict
 
 
@@ -69,8 +69,8 @@ class UserProfileDetail(BaseModel):
     nationality: str
     role: str
     score: int
-    global_rank: Optional[int] = None
-    globalRank: Optional[int] = None
+    global_rank: Optional[Union[int, str]] = None
+    globalRank: Optional[Union[int, str]] = None
     rank_name: str
     rankName: Optional[str] = None
     created_at: datetime

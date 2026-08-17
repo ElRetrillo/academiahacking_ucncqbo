@@ -19,8 +19,19 @@ from app.services.security import verify_flag, hash_flag
 
 class ChallengeService:
     @staticmethod
-    async def get_public_challenges(db: AsyncSession, user: Optional[User] = None) -> List[ChallengePublic]:
-        query = select(Challenge).where(Challenge.is_active == True).order_by(Challenge.points.asc(), Challenge.slug.asc())
+    async def get_public_challenges(
+        db: AsyncSession,
+        user: Optional[User] = None,
+        category: Optional[str] = None,
+        difficulty: Optional[str] = None,
+    ) -> List[ChallengePublic]:
+        query = select(Challenge).where(Challenge.is_active == True)
+        if category:
+            query = query.where(Challenge.category == category.lower())
+        if difficulty:
+            query = query.where(Challenge.difficulty == difficulty.upper())
+
+        query = query.order_by(Challenge.points.asc(), Challenge.slug.asc())
         result = await db.execute(query)
         challenges = result.scalars().all()
 
@@ -48,6 +59,50 @@ class ChallengeService:
                 )
             )
         return public_list
+
+    @staticmethod
+    async def get_recent_challenges(
+        db: AsyncSession,
+        user: Optional[User] = None,
+        limit: int = 5,
+    ) -> List[ChallengePublic]:
+        query = select(Challenge).where(Challenge.is_active == True).order_by(Challenge.created_at.desc()).limit(limit)
+        result = await db.execute(query)
+        challenges = result.scalars().all()
+
+        solved_challenge_ids = set()
+        if user:
+            solves_query = select(Solve.challenge_id).where(Solve.user_id == user.id)
+            solves_result = await db.execute(solves_query)
+            solved_challenge_ids = set(solves_result.scalars().all())
+
+        return [
+            ChallengePublic(
+                id=ch.id,
+                slug=ch.slug,
+                title=ch.title,
+                description=ch.description,
+                category=ch.category,
+                difficulty=ch.difficulty,
+                points=ch.points,
+                target_url=ch.target_url,
+                hints=ch.hints,
+                solves_count=ch.solves_count,
+                is_solved=(ch.id in solved_challenge_ids),
+            )
+            for ch in challenges
+        ]
+
+    @staticmethod
+    async def get_category_summary(db: AsyncSession) -> List[dict]:
+        query = (
+            select(Challenge.category, func.count(Challenge.id).label("count"))
+            .where(Challenge.is_active == True)
+            .group_by(Challenge.category)
+            .order_by(Challenge.category.asc())
+        )
+        result = await db.execute(query)
+        return [{"category": row.category, "count": row.count} for row in result.all()]
 
     @staticmethod
     async def get_challenge_by_id_or_slug(db: AsyncSession, challenge_id_or_slug: str, user: Optional[User] = None) -> ChallengePublic:

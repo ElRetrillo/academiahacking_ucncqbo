@@ -24,7 +24,7 @@ async def test_get_user_profile_detail(
     assert data["solves_count"] == 0
     assert len(data["solves_by_category"]) == 0
     assert len(data["recent_solves"]) == 0
-    assert data["global_rank"] == 1  # Only player in DB
+    assert data["global_rank"] == "Sin clasificar"
 
     # 2. Simulate solving the sample challenge
     solve = Solve(
