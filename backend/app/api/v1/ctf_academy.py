@@ -116,35 +116,28 @@ async def build_academy_state(db: AsyncSession, user: Optional[User]) -> dict:
         if total_challenges > 0 and len(completed_ids) >= total_challenges and solves:
             completed_at_ts = int(solves[-1].solved_at.timestamp() * 1000)
 
-        # Compute Global Leaderboard Rank (only for players with role == "user")
-        global_rank = None
-        if user.role == "user":
-            solve_stats_subquery = (
-                select(
-                    Solve.user_id,
-                    func.max(Solve.solved_at).label("last_solve_at"),
-                )
+        # Compute Global Leaderboard Rank: "Sin clasificar" if 0 pts or 0 solves or admin
+        global_rank = "Sin clasificar"
+        if user.role == "user" and user.score > 0 and len(completed_ids) > 0:
+            active_solvers_subquery = (
+                select(Solve.user_id)
                 .group_by(Solve.user_id)
                 .subquery()
             )
             
             rank_query = (
                 select(User.id)
-                .outerjoin(solve_stats_subquery, User.id == solve_stats_subquery.c.user_id)
-                .where(User.is_active == True, User.role == "user")
-                .order_by(
-                    desc(User.score),
-                    solve_stats_subquery.c.last_solve_at.asc().nulls_last(),
-                    User.created_at.asc(),
-                )
+                .join(active_solvers_subquery, User.id == active_solvers_subquery.c.user_id)
+                .where(User.is_active == True, User.role == "user", User.score > 0)
+                .order_by(desc(User.score), User.created_at.asc())
             )
             
             rank_res = await db.execute(rank_query)
-            all_user_ids = [row[0] for row in rank_res.all()]
+            ranked_user_ids = [row[0] for row in rank_res.all()]
             try:
-                global_rank = all_user_ids.index(user.id) + 1
+                global_rank = ranked_user_ids.index(user.id) + 1
             except ValueError:
-                global_rank = None
+                global_rank = "Sin clasificar"
 
         rank_name = UserService.get_rank_name(user.score)
 

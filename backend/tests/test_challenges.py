@@ -65,3 +65,30 @@ async def test_submit_flag_lifecycle(client: AsyncClient, sample_challenge: Chal
     assert list_resp.status_code == 200
     assert list_resp.json()[0]["is_solved"] is True
     assert list_resp.json()[0]["solves_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_challenge_filters_recent_and_categories(client: AsyncClient, sample_challenge: Challenge):
+    # 1. Test /challenges/recent
+    recent_resp = await client.get("/api/v1/challenges/recent?limit=5")
+    assert recent_resp.status_code == 200
+    recent_list = recent_resp.json()
+    assert len(recent_list) == 1
+    assert recent_list[0]["slug"] == sample_challenge.slug
+
+    # 2. Test /challenges/categories
+    cats_resp = await client.get("/api/v1/challenges/categories")
+    assert cats_resp.status_code == 200
+    cats_list = cats_resp.json()
+    assert len(cats_list) == 1
+    assert cats_list[0]["category"] == "web"
+    assert cats_list[0]["count"] == 1
+
+    # 3. Test filtering by category and difficulty
+    filter_resp = await client.get("/api/v1/challenges?category=web&difficulty=EASY")
+    assert filter_resp.status_code == 200
+    assert len(filter_resp.json()) == 1
+
+    no_match_resp = await client.get("/api/v1/challenges?category=pwn")
+    assert no_match_resp.status_code == 200
+    assert len(no_match_resp.json()) == 0
