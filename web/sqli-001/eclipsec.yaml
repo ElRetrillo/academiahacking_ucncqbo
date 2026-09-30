@@ -1,0 +1,11 @@
+id: web-sqli-001
+name: Login Bypass
+version: "1.0"
+
+category: web
+difficulty: easy
+points: 100
+
+target:
+  type: http
+  port: 8080
