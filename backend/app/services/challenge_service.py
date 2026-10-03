@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, update, delete
 from fastapi import HTTPException, status
 
+from app.config import settings
 from app.models.challenge import Challenge
 from app.models.solve import Solve, Submission
 from app.models.user import User
@@ -15,6 +16,18 @@ from app.schemas.challenge import (
     FlagSubmissionResponse,
 )
 from app.services.security import verify_flag, hash_flag
+
+
+def resolve_target_url(target_url: Optional[str]) -> Optional[str]:
+    """Make a relative challenge path absolute using CHALLENGES_BASE_URL.
+
+    Absolute URLs and empty values pass through untouched; with no base URL
+    configured the stored value is returned as-is.
+    """
+    base = settings.CHALLENGES_BASE_URL.strip().rstrip("/")
+    if target_url and base and target_url.startswith("/") and not target_url.startswith("//"):
+        return f"{base}{target_url}"
+    return target_url
 
 
 class ChallengeService:
@@ -52,7 +65,7 @@ class ChallengeService:
                     category=ch.category,
                     difficulty=ch.difficulty,
                     points=ch.points,
-                    target_url=ch.target_url,
+                    target_url=resolve_target_url(ch.target_url),
                     hints=ch.hints,
                     solves_count=ch.solves_count,
                     is_solved=(ch.id in solved_challenge_ids),
@@ -85,7 +98,7 @@ class ChallengeService:
                 category=ch.category,
                 difficulty=ch.difficulty,
                 points=ch.points,
-                target_url=ch.target_url,
+                target_url=resolve_target_url(ch.target_url),
                 hints=ch.hints,
                 solves_count=ch.solves_count,
                 is_solved=(ch.id in solved_challenge_ids),
@@ -129,7 +142,7 @@ class ChallengeService:
             category=ch.category,
             difficulty=ch.difficulty,
             points=ch.points,
-            target_url=ch.target_url,
+            target_url=resolve_target_url(ch.target_url),
             hints=ch.hints,
             solves_count=ch.solves_count,
             is_solved=is_solved,

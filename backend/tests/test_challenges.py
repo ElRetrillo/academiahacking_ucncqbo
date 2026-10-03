@@ -92,3 +92,54 @@ async def test_challenge_filters_recent_and_categories(client: AsyncClient, samp
     no_match_resp = await client.get("/api/v1/challenges?category=pwn")
     assert no_match_resp.status_code == 200
     assert len(no_match_resp.json()) == 0
+
+
+# ── target_url resolution against CHALLENGES_BASE_URL ────────────────────────
+
+from app.config import settings
+from app.services.challenge_service import resolve_target_url
+
+
+@pytest.mark.parametrize(
+    "base, stored, expected",
+    [
+        ("https://ctf.example.com", "/web-001/", "https://ctf.example.com/web-001/"),
+        ("https://ctf.example.com/", "/web-001/", "https://ctf.example.com/web-001/"),
+        ("https://ctf.example.com", "https://other.host/x", "https://other.host/x"),
+        ("https://ctf.example.com", "//evil.example/x", "//evil.example/x"),
+        ("https://ctf.example.com", None, None),
+        ("https://ctf.example.com", "", ""),
+        ("", "/web-001/", "/web-001/"),
+    ],
+)
+def test_resolve_target_url(monkeypatch, base, stored, expected):
+    monkeypatch.setattr(settings, "CHALLENGES_BASE_URL", base)
+    assert resolve_target_url(stored) == expected
+
+
+@pytest.mark.asyncio
+async def test_public_challenge_listing_serves_absolute_target_url(client: AsyncClient, db_session, monkeypatch):
+    monkeypatch.setattr(settings, "CHALLENGES_BASE_URL", "https://ctf.example.com")
+    db_session.add(
+        Challenge(
+            slug="web-900",
+            title="Resolver check",
+            description="d",
+            category="web",
+            difficulty="EASY",
+            points=10,
+            flag="EclipSec{x}",
+            flag_hash="h",
+            target_url="/web-900/",
+            is_active=True,
+        )
+    )
+    await db_session.commit()
+
+    listing = await client.get("/api/v1/challenges")
+    assert listing.status_code == 200
+    urls = {c["slug"]: c["target_url"] for c in listing.json()}
+    assert urls["web-900"] == "https://ctf.example.com/web-900/"
+
+    detail = await client.get("/api/v1/challenges/web-900")
+    assert detail.json()["target_url"] == "https://ctf.example.com/web-900/"
