@@ -28,6 +28,11 @@ class Settings(BaseSettings):
     # Allow wildcard vercel subdomains via regex pattern
     CORS_ORIGIN_REGEX: str = r"^https:\/\/.*\.vercel\.app$"
     
+    # Public base URL of the deployed challenge containers (e.g. the monolithic
+    # Railway service). Relative challenge target_urls such as "/web-001/" are
+    # resolved against it when served, so the DB stays portable across hosts.
+    CHALLENGES_BASE_URL: str = ""
+
     # Initial Admin Seed
     ADMIN_USERNAME: str = "admin"
     ADMIN_EMAIL: str = "admin@eclipsec.cl"

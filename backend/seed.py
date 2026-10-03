@@ -48,7 +48,7 @@ CHALLENGES_DATA = [
         "category": "web",
         "difficulty": "MEDIUM",
         "points": 250,
-        "flag": "EclipSec{p1ng_0f_d34th_c0mm4nd_1nj}",
+        "flag": "EclipSec{p1ng_0f_d34th_cmdi}",
         "description": "Exploit an unsanitized command injection flaw inside a network ping diagnostic tool.",
         "target_url": "/web-004/",
         "hints": "Use command separators like ; or && to chain shell commands.",
