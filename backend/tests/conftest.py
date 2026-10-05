@@ -101,3 +101,28 @@ async def sample_challenge(db_session: AsyncSession):
     await db_session.commit()
     await db_session.refresh(ch)
     return ch
+
+
+@pytest_asyncio.fixture(scope="function")
+async def local_challenge(db_session: AsyncSession):
+    """A downloadable local challenge with repository/path metadata."""
+    ch = Challenge(
+        slug="web-sqli-001",
+        title="Login Bypass",
+        description="Bypass the login via SQL injection. Runs locally with the CLI.",
+        category="web",
+        difficulty="EASY",
+        points=100,
+        version="1.0",
+        repository="ElRetrillo/retos_ctf",
+        path="web/sqli-001",
+        flag="EclipSec{l0g1n_byp4ss_sqli_success_9f81a7}",
+        flag_hash=hash_flag("EclipSec{l0g1n_byp4ss_sqli_success_9f81a7}"),
+        target_url=None,
+        is_active=True,
+        solves_count=0,
+    )
+    db_session.add(ch)
+    await db_session.commit()
+    await db_session.refresh(ch)
+    return ch

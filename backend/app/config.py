@@ -33,6 +33,11 @@ class Settings(BaseSettings):
     # resolved against it when served, so the DB stays portable across hosts.
     CHALLENGES_BASE_URL: str = ""
 
+    # Canonical GitHub repository ("owner/repo") that hosts downloadable local
+    # challenges. Used as the default `repository` for seeded local challenges so
+    # the CLI knows where to fetch them. Must be a public repo.
+    CHALLENGES_REPOSITORY: str = "ElRetrillo/retos_ctf"
+
     # Initial Admin Seed
     ADMIN_USERNAME: str = "admin"
     ADMIN_EMAIL: str = "admin@eclipsec.cl"

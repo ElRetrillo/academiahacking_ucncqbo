@@ -32,10 +32,18 @@ class Challenge(Base):
     target_url = Column(String(255), nullable=True)  # e.g., /web-001/ or http://host:8001
     hints = Column(Text, nullable=True)  # Optional JSON or plaintext hints
     
+    # Local-challenge registry: where the CLI downloads this challenge from.
+    # repository is a "owner/repo" GitHub slug, path is the directory inside it.
+    version = Column(String(20), default="1.0", nullable=False)  # e.g. "1.0"
+    repository = Column(String(255), nullable=True)  # e.g. "ElRetrillo/retos_ctf"
+    path = Column(String(255), nullable=True)  # e.g. "web/sqli-001"
+
     is_active = Column(Boolean, default=True, nullable=False)
     solves_count = Column(Integer, default=0, nullable=False)
     created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)
 
     # Relationships
     solves = relationship("Solve", back_populates="challenge", cascade="all, delete-orphan")
     submissions = relationship("Submission", back_populates="challenge", cascade="all, delete-orphan")
+    instances = relationship("ChallengeInstance", back_populates="challenge", cascade="all, delete-orphan")

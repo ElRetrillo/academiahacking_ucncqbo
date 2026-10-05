@@ -8,6 +8,7 @@ from app.schemas.challenge import (
     ChallengePublic,
     FlagSubmissionRequest,
     FlagSubmissionResponse,
+    ChallengeInstanceResponse,
 )
 from app.services.challenge_service import ChallengeService
 from app.api.deps import get_current_user, get_current_user_optional
@@ -73,4 +74,33 @@ async def submit_flag(
         challenge_id_or_slug=challenge_id_or_slug,
         submitted_flag=req.flag,
         user=current_user,
+    )
+
+
+@router.post("/{challenge_id_or_slug}/start", response_model=ChallengeInstanceResponse)
+async def start_instance(
+    challenge_id_or_slug: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Start (or resume) a local-execution instance of a challenge.
+
+    Records the session server-side and returns the metadata the EclipSec CLI
+    needs to download the challenge from its repository and run it locally.
+    The backend does NOT run Docker. Idempotent for an already-running instance.
+    """
+    return await ChallengeService.start_instance(
+        db=db, challenge_id_or_slug=challenge_id_or_slug, user=current_user
+    )
+
+
+@router.post("/{challenge_id_or_slug}/stop", response_model=ChallengeInstanceResponse)
+async def stop_instance(
+    challenge_id_or_slug: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Mark the current player's running instance of a challenge as stopped."""
+    return await ChallengeService.stop_instance(
+        db=db, challenge_id_or_slug=challenge_id_or_slug, user=current_user
     )

@@ -7,6 +7,7 @@ from fastapi import HTTPException, status
 from app.config import settings
 from app.models.challenge import Challenge
 from app.models.solve import Solve, Submission
+from app.models.instance import ChallengeInstance, STATUS_RUNNING, STATUS_STOPPED
 from app.models.user import User
 from app.schemas.challenge import (
     ChallengeCreate,
@@ -14,6 +15,8 @@ from app.schemas.challenge import (
     ChallengePublic,
     ChallengeAdmin,
     FlagSubmissionResponse,
+    ChallengeInstanceResponse,
+    InstanceChallengeInfo,
 )
 from app.services.security import verify_flag, hash_flag
 
@@ -28,6 +31,26 @@ def resolve_target_url(target_url: Optional[str]) -> Optional[str]:
     if target_url and base and target_url.startswith("/") and not target_url.startswith("//"):
         return f"{base}{target_url}"
     return target_url
+
+
+def to_public(ch: Challenge, is_solved: bool = False) -> ChallengePublic:
+    """Map a Challenge ORM row to its public (flag-free) representation."""
+    return ChallengePublic(
+        id=ch.id,
+        slug=ch.slug,
+        title=ch.title,
+        description=ch.description,
+        category=ch.category,
+        difficulty=ch.difficulty,
+        points=ch.points,
+        target_url=resolve_target_url(ch.target_url),
+        hints=ch.hints,
+        version=ch.version,
+        repository=ch.repository,
+        path=ch.path,
+        solves_count=ch.solves_count,
+        is_solved=is_solved,
+    )
 
 
 class ChallengeService:
@@ -54,24 +77,7 @@ class ChallengeService:
             solves_result = await db.execute(solves_query)
             solved_challenge_ids = set(solves_result.scalars().all())
 
-        public_list = []
-        for ch in challenges:
-            public_list.append(
-                ChallengePublic(
-                    id=ch.id,
-                    slug=ch.slug,
-                    title=ch.title,
-                    description=ch.description,
-                    category=ch.category,
-                    difficulty=ch.difficulty,
-                    points=ch.points,
-                    target_url=resolve_target_url(ch.target_url),
-                    hints=ch.hints,
-                    solves_count=ch.solves_count,
-                    is_solved=(ch.id in solved_challenge_ids),
-                )
-            )
-        return public_list
+        return [to_public(ch, is_solved=(ch.id in solved_challenge_ids)) for ch in challenges]
 
     @staticmethod
     async def get_recent_challenges(
@@ -89,22 +95,7 @@ class ChallengeService:
             solves_result = await db.execute(solves_query)
             solved_challenge_ids = set(solves_result.scalars().all())
 
-        return [
-            ChallengePublic(
-                id=ch.id,
-                slug=ch.slug,
-                title=ch.title,
-                description=ch.description,
-                category=ch.category,
-                difficulty=ch.difficulty,
-                points=ch.points,
-                target_url=resolve_target_url(ch.target_url),
-                hints=ch.hints,
-                solves_count=ch.solves_count,
-                is_solved=(ch.id in solved_challenge_ids),
-            )
-            for ch in challenges
-        ]
+        return [to_public(ch, is_solved=(ch.id in solved_challenge_ids)) for ch in challenges]
 
     @staticmethod
     async def get_category_summary(db: AsyncSession) -> List[dict]:
@@ -134,19 +125,7 @@ class ChallengeService:
             solve_res = await db.execute(solve_query)
             is_solved = solve_res.scalar_one_or_none() is not None
 
-        return ChallengePublic(
-            id=ch.id,
-            slug=ch.slug,
-            title=ch.title,
-            description=ch.description,
-            category=ch.category,
-            difficulty=ch.difficulty,
-            points=ch.points,
-            target_url=resolve_target_url(ch.target_url),
-            hints=ch.hints,
-            solves_count=ch.solves_count,
-            is_solved=is_solved,
-        )
+        return to_public(ch, is_solved=is_solved)
 
     @staticmethod
     async def submit_flag(db: AsyncSession, challenge_id_or_slug: str, submitted_flag: str, user: User) -> FlagSubmissionResponse:
@@ -218,6 +197,100 @@ class ChallengeService:
         )
 
     # ──────────────────────────────────────────────────────────────
+    # Challenge instances (local-execution sessions)
+    # ──────────────────────────────────────────────────────────────
+
+    @staticmethod
+    async def _get_active_challenge(db: AsyncSession, challenge_id_or_slug: str) -> Challenge:
+        query = select(Challenge).where(
+            (Challenge.id == challenge_id_or_slug) | (Challenge.slug == challenge_id_or_slug),
+            Challenge.is_active == True,
+        )
+        result = await db.execute(query)
+        ch = result.scalar_one_or_none()
+        if not ch:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Challenge not found or inactive.")
+        return ch
+
+    @staticmethod
+    def _instance_response(instance: ChallengeInstance, ch: Challenge) -> ChallengeInstanceResponse:
+        return ChallengeInstanceResponse(
+            id=instance.id,
+            status=instance.status,
+            created_at=instance.created_at,
+            started_at=instance.started_at,
+            stopped_at=instance.stopped_at,
+            expiration_at=instance.expiration_at,
+            challenge=InstanceChallengeInfo(
+                id=ch.id,
+                slug=ch.slug,
+                title=ch.title,
+                category=ch.category,
+                difficulty=ch.difficulty,
+                points=ch.points,
+                version=ch.version,
+                repository=ch.repository,
+                path=ch.path,
+                target_url=resolve_target_url(ch.target_url),
+            ),
+        )
+
+    @staticmethod
+    async def start_instance(db: AsyncSession, challenge_id_or_slug: str, user: User) -> ChallengeInstanceResponse:
+        """Create (or return the existing) running instance for this user+challenge.
+
+        Idempotent: starting an already-running challenge returns the same
+        instance. The backend never runs Docker; it only records the session and
+        hands back the metadata the CLI needs to download and run it locally.
+        """
+        ch = await ChallengeService._get_active_challenge(db, challenge_id_or_slug)
+
+        existing_q = select(ChallengeInstance).where(
+            ChallengeInstance.user_id == user.id,
+            ChallengeInstance.challenge_id == ch.id,
+            ChallengeInstance.status == STATUS_RUNNING,
+        )
+        existing = (await db.execute(existing_q)).scalar_one_or_none()
+        if existing:
+            return ChallengeService._instance_response(existing, ch)
+
+        now = datetime.now(timezone.utc)
+        instance = ChallengeInstance(
+            user_id=user.id,
+            challenge_id=ch.id,
+            status=STATUS_RUNNING,
+            created_at=now,
+            started_at=now,
+        )
+        db.add(instance)
+        await db.commit()
+        await db.refresh(instance)
+        return ChallengeService._instance_response(instance, ch)
+
+    @staticmethod
+    async def stop_instance(db: AsyncSession, challenge_id_or_slug: str, user: User) -> ChallengeInstanceResponse:
+        """Mark the user's running instance for this challenge as stopped."""
+        ch = await ChallengeService._get_active_challenge(db, challenge_id_or_slug)
+
+        instance_q = select(ChallengeInstance).where(
+            ChallengeInstance.user_id == user.id,
+            ChallengeInstance.challenge_id == ch.id,
+            ChallengeInstance.status == STATUS_RUNNING,
+        )
+        instance = (await db.execute(instance_q)).scalar_one_or_none()
+        if not instance:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No running instance for this challenge.",
+            )
+
+        instance.status = STATUS_STOPPED
+        instance.stopped_at = datetime.now(timezone.utc)
+        await db.commit()
+        await db.refresh(instance)
+        return ChallengeService._instance_response(instance, ch)
+
+    # ──────────────────────────────────────────────────────────────
     # Admin methods
     # ──────────────────────────────────────────────────────────────
 
@@ -246,6 +319,9 @@ class ChallengeService:
             flag_hash=hash_flag(req.flag.strip()),
             target_url=req.target_url,
             hints=req.hints,
+            version=req.version,
+            repository=req.repository,
+            path=req.path,
             is_active=True,
             solves_count=0,
             created_at=datetime.now(timezone.utc),
@@ -277,6 +353,12 @@ class ChallengeService:
             ch.target_url = req.target_url
         if req.hints is not None:
             ch.hints = req.hints
+        if req.version is not None:
+            ch.version = req.version
+        if req.repository is not None:
+            ch.repository = req.repository
+        if req.path is not None:
+            ch.path = req.path
         if req.flag is not None:
             ch.flag = req.flag.strip()
             ch.flag_hash = hash_flag(req.flag.strip())

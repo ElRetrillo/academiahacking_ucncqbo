@@ -130,6 +130,23 @@ CHALLENGES_DATA = [
         "target_url": "/web-011/",
         "hints": "Use ?cmd=cat+/flag.txt to dump the target flag.",
     },
+    {
+        # First "local" challenge: downloaded from the public challenge repo and
+        # run by the participant with Docker via the EclipSec CLI. No public
+        # target_url — it is served on the player's own localhost:8080.
+        "slug": "web-sqli-001",
+        "title": "Login Bypass",
+        "category": "web",
+        "difficulty": "EASY",
+        "points": 100,
+        "version": "1.0",
+        "flag": "EclipSec{l0g1n_byp4ss_sqli_success_9f81a7}",
+        "description": "Bypass the login form of the SecureCorp admin portal and authenticate as admin to reveal the flag. Runs locally with the EclipSec CLI.",
+        "target_url": None,
+        "hints": "Analyze how the login query is built. What happens if the input is not treated as data?",
+        "repository": settings.CHALLENGES_REPOSITORY,
+        "path": "web/sqli-001",
+    },
 ]
 
 DEMO_USERS = [
@@ -183,8 +200,11 @@ async def seed():
                     flag=ch_data["flag"],
                     flag_hash=hash_flag(ch_data["flag"]),
                     description=ch_data["description"],
-                    target_url=ch_data["target_url"],
-                    hints=ch_data["hints"],
+                    target_url=ch_data.get("target_url"),
+                    hints=ch_data.get("hints"),
+                    version=ch_data.get("version", "1.0"),
+                    repository=ch_data.get("repository"),
+                    path=ch_data.get("path"),
                     is_active=True,
                     solves_count=0,
                     created_at=datetime.now(timezone.utc),
