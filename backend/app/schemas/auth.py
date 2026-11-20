@@ -1,5 +1,4 @@
 from pydantic import BaseModel, EmailStr, Field
-from typing import Optional
 from app.schemas.user import UserProfile
 
 
@@ -19,3 +18,13 @@ class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     user: UserProfile
+
+
+class SessionResponse(BaseModel):
+    authenticated: bool = True
+    user: UserProfile
+
+
+class LogoutResponse(BaseModel):
+    authenticated: bool = False
+    message: str

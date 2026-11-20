@@ -1,41 +1,41 @@
 from datetime import datetime, timezone
-from typing import Optional
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, or_, func
 from fastapi import HTTPException, status
+from sqlalchemy import func, or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.user import User
+from app.config import settings
 from app.models.solve import Solve
-from app.schemas.auth import RegisterRequest, LoginRequest, TokenResponse
+from app.models.user import User
+from app.schemas.auth import LoginRequest, RegisterRequest, TokenResponse
 from app.schemas.user import UserProfile, UserUpdate
-from app.services.security import hash_password, verify_password, create_access_token
+from app.services.security import create_access_token, hash_password, verify_password
 
 
 class AuthService:
     @staticmethod
     async def register_user(db: AsyncSession, req: RegisterRequest) -> User:
-        # Check if username or email already exists
         query = select(User).where(or_(User.username == req.username, User.email == req.email))
         result = await db.execute(query)
         existing_user = result.scalar_one_or_none()
-        
+
         if existing_user:
             if existing_user.username == req.username:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Username is already registered."
+                    detail="Username is already registered.",
                 )
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Email is already registered."
+                detail="Email is already registered.",
             )
 
-        # Assign "admin" to the first user, and "user" to everyone else
-        count_query = select(func.count()).select_from(User)
-        count_res = await db.execute(count_query)
-        user_count = count_res.scalar() or 0
-        role = "admin" if user_count == 0 else "user"
+        role = "user"
+        if settings.ALLOW_FIRST_USER_ADMIN:
+            count_res = await db.execute(select(func.count()).select_from(User))
+            if (count_res.scalar() or 0) == 0:
+                role = "admin"
 
+        now = datetime.now(timezone.utc)
         new_user = User(
             username=req.username,
             email=req.email,
@@ -44,8 +44,8 @@ class AuthService:
             role=role,
             score=0,
             is_active=True,
-            created_at=datetime.now(timezone.utc),
-            last_connected_at=datetime.now(timezone.utc),
+            created_at=now,
+            last_connected_at=now,
         )
         db.add(new_user)
         await db.commit()
@@ -53,7 +53,11 @@ class AuthService:
         return new_user
 
     @staticmethod
-    async def authenticate_user(db: AsyncSession, req: LoginRequest) -> TokenResponse:
+    async def authenticate_user(
+        db: AsyncSession,
+        req: LoginRequest,
+        token_type: str = "cli",
+    ) -> TokenResponse:
         query = select(User).where(
             or_(User.username == req.username_or_email, User.email == req.username_or_email)
         )
@@ -70,17 +74,16 @@ class AuthService:
         if not user.is_active:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="User account is deactivated."
+                detail="User account is deactivated.",
             )
 
-        # Update last connected timestamp
         user.last_connected_at = datetime.now(timezone.utc)
         await db.commit()
         await db.refresh(user)
 
-        # Get solves count
-        solves_count_query = select(func.count()).select_from(Solve).where(Solve.user_id == user.id)
-        solves_res = await db.execute(solves_count_query)
+        solves_res = await db.execute(
+            select(func.count()).select_from(Solve).where(Solve.user_id == user.id)
+        )
         solves_count = solves_res.scalar() or 0
 
         user_profile = UserProfile(
@@ -96,13 +99,14 @@ class AuthService:
             solves_count=solves_count,
         )
 
-        access_token = create_access_token(subject=user.id)
+        access_token = create_access_token(subject=user.id, token_type=token_type)
         return TokenResponse(access_token=access_token, user=user_profile)
 
     @staticmethod
     async def get_user_profile(db: AsyncSession, user: User) -> UserProfile:
-        solves_count_query = select(func.count()).select_from(Solve).where(Solve.user_id == user.id)
-        solves_res = await db.execute(solves_count_query)
+        solves_res = await db.execute(
+            select(func.count()).select_from(Solve).where(Solve.user_id == user.id)
+        )
         solves_count = solves_res.scalar() or 0
 
         return UserProfile(
@@ -127,7 +131,7 @@ class AuthService:
             if not req.current_password or not verify_password(req.current_password, user.hashed_password):
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Current password does not match."
+                    detail="Current password does not match.",
                 )
             user.hashed_password = hash_password(req.new_password)
 
