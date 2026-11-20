@@ -34,10 +34,6 @@ Definido en [docker/docker-compose.yml](../docker/docker-compose.yml). Levanta c
 - Aplicaciones Web: `8001` a `8011` (internamente puerto `80` tras Nginx + Flask).
 - Terminales WebSocket (`ttyd`): `7681` a `7691`.
 
-**Limitaciones conocidas pendientes de remediacion (Fase 2):**
-- Los archivos `docker/challenge-web-002/Dockerfile` hasta `011` contienen actualmente un error de sintaxis en la linea 1 (`\`) y variables Nginx escapadas incorrectamente, por lo que requieren reparacion antes de compilar con `docker compose up --build`.
-- El servicio `web-001` en `docker/docker-compose.yml` no declara la red `ctf-net`.
-
 ### 2.2 Contenedor Monolitico con Nginx (Railway PaaS)
 
 Definido en [docker/monolithic/](../docker/monolithic/Dockerfile). Dado que Railway expone un unico dominio por servicio en puertos `80`/`443`, este nodo enruta mediante Nginx bajo subrutas `/web-001/` a `/web-011/` y `/web-001/ws/` a `/web-011/ws/`.
@@ -81,7 +77,7 @@ Introducido para retos como `web-sqli-001`:
 | `ADMIN_EMAIL` | Correo administrador inicial | Opcional |
 | `ADMIN_PASSWORD` | Credencial inicial segura | Opcional |
 
-Nota: En Fase 2 se unificaran `railway.toml` y `backend/railway.json`, y en Fase 3 `backend/Dockerfile` respetara la variable dinamica `$PORT` corriendo bajo usuario sin privilegios.
+Nota: En Fase 3 `backend/Dockerfile` respetara la variable dinamica `$PORT` corriendo bajo usuario sin privilegios.
 
 ---
 
