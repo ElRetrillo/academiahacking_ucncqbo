@@ -3,11 +3,16 @@
 venv/
 ENV/
 
-# Python bytecode & cache
+# Python bytecode and caches
 __pycache__/
 *.py[cod]
 *$py.class
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+coverage.xml
 
 # Local databases
 *.db
@@ -18,6 +23,11 @@ __pycache__/
 .env
 .env.local
 
-# IDE / Editor configs
+# IDE and local tooling
 .vscode/
 .idea/
+.atl/
+
+# OS generated files
+.DS_Store
+Thumbs.db
