@@ -1,5 +1,6 @@
 import pytest
 from httpx import AsyncClient
+
 from app.models.challenge import Challenge
 
 
@@ -36,7 +37,6 @@ async def test_start_returns_instance_with_download_metadata(
     assert data["status"] == "running"
     assert data["id"]
     ch = data["challenge"]
-    # The CLI needs these to download and run the challenge locally
     assert ch["repository"] == "ElRetrillo/retos_ctf"
     assert ch["path"] == "web/sqli-001"
     assert ch["version"] == "1.0"
@@ -56,7 +56,6 @@ async def test_start_is_idempotent(
         f"/api/v1/challenges/{local_challenge.slug}/start", headers=headers
     )
     assert first.status_code == second.status_code == 200
-    # Same running instance returned, not a duplicate
     assert first.json()["id"] == second.json()["id"]
 
 

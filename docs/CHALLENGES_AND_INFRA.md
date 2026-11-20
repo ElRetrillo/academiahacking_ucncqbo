@@ -41,7 +41,7 @@ Definido en [docker/monolithic/](../docker/monolithic/Dockerfile). Dado que Rail
 **Aislamiento y Configuracion Actual:**
 - Cada servicio Flask se ejecuta bajo un usuario dedicado sin privilegios (`web002` a `web011`), sin `ttyd`, sin `ENV FLAG=` global y con permisos `0550`/`0440` (`0700` en `web-006` para SQLite) para impedir movimiento lateral o lectura de flags de otros retos.
 - Las flags se inyectan en build-time via `ARG FLAG_WEB_001`..`ARG FLAG_WEB_011`, manteniendo los valores por defecto solo para desarrollo local y permitiendo sobrescribirlos en despliegue real.
-- Para maxima resiliencia y limites de recursos independientes (Fase 5), se recomienda igualmente optar por contenedores separados o ejecucion local via `eclipsecCLI` en competencias con alta concurrencia.
+- En Fase 5 se agregaran limites de recursos (`mem_limit`, `cpus`, `pids_limit`) y rootfs de solo lectura donde aplique.
 
 ### 2.3 Retos Locales mediante `eclipsecCLI`
 
@@ -56,9 +56,10 @@ Introducido para retos como `web-sqli-001`:
 
 ### Configuracion Actual
 
-- Archivo raiz [railway.toml](../railway.toml) y archivo [backend/railway.json](../backend/railway.json) apuntan a `backend/Dockerfile`.
-- Railway aprovisiona la base de datos PostgreSQL inyectando `DATABASE_URL` (normalizada automaticamente por `Settings.assemble_db_connection` a `postgresql+asyncpg://`).
-- Al iniciar, `app/main.py` ejecuta `Base.metadata.create_all`, corre `run_lightweight_migrations()` y siembra los retos iniciales cuando la tabla `challenges` esta vacia.
+- Archivo raiz [railway.toml](../railway.toml) y archivo [backend/railway.json](../backend/railway.json) apuntan a `backend/Dockerfile` (`appuser`, build multi-stage y puerto dinamico `${PORT:-8080}`).
+- Railway aprovisiona PostgreSQL inyectando `DATABASE_URL` (normalizada automaticamente por `Settings.assemble_db_connection` a `postgresql+asyncpg://`).
+- El esquema de base de datos se gestiona formalmente con **Alembic** (`alembic upgrade head`). Al iniciar con `AUTO_SEED_ENABLED=true`, `app/main.py` sincroniza de manera idempotente el usuario admin (si aplica) y los retos faltantes mediante `sync_seed_data()`.
+- `GET /health` ejecuta `SELECT 1` para verificar conectividad real de la base de datos antes de reportar servicio saludable.
 
 ### Variables de Entorno del Backend
 
@@ -67,18 +68,24 @@ Introducido para retos como `web-sqli-001`:
 | `PROJECT_NAME` | Nombre visible en OpenAPI | Opcional |
 | `ENVIRONMENT` | `development` o `production` | Si |
 | `DATABASE_URL` | Cadena de conexion PostgreSQL/SQLite | Si |
+| `DB_ECHO` | Logging verbose SQL (`false` por defecto) | Opcional |
+| `AUTO_SEED_ENABLED` | Activa `sync_seed_data()` al iniciar (`true` por defecto) | Opcional |
 | `JWT_SECRET` | Clave secreta aleatoria de minimo 32 caracteres | Si (critica) |
+| `FLAG_HMAC_SECRET` | Clave secreta HMAC-SHA256 de minimo 32 caracteres para flags | Si (critica) |
 | `JWT_ALGORITHM` | Algoritmo de firma JWT (`HS256`) | Opcional |
-| `ACCESS_TOKEN_EXPIRE_MINUTES` | Duracion del token | Opcional |
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | Duracion de cookie de sesion web en minutos | Opcional |
+| `CLI_TOKEN_EXPIRE_MINUTES` | Duracion de token CLI en minutos | Opcional |
 | `CORS_ORIGINS` | Lista separada por comas de origenes web exactos | Si |
-| `CORS_ORIGIN_REGEX` | Expresion regular para subdominios autorizados | Opcional (restringir en Fase 3) |
+| `CORS_ORIGIN_REGEX` | Expresion regular estricta para origenes adicionales | Opcional (vacio por defecto) |
+| `COOKIE_SAMESITE` | Politica SameSite (`lax`, `strict`, `none`) | Opcional |
+| `TRUSTED_PROXY_COUNT` | Numero de proxies inversos confiables para `X-Forwarded-For` (`0` o `1` en Railway) | Opcional |
+| `RATE_LIMIT_ENABLED` | Habilita control de tasa deslizante | Opcional |
 | `CHALLENGES_BASE_URL` | URL base publica del nodo de retos para resolver rutas relativas `/web-00X/` | Si (si hay retos alojados) |
 | `CHALLENGES_REPOSITORY` | Repositorio `owner/repo` para descarga local via CLI | Opcional (`ElRetrillo/retos_ctf`) |
-| `ADMIN_USERNAME` | Usuario administrador inicial (reservado) | Opcional |
+| `CHALLENGES_FLAGS_FILE` | Ruta a JSON con flags de produccion (o variables `FLAG_<SLUG>`) | Si (si no usa `FLAG_<SLUG>`) |
+| `ADMIN_USERNAME` | Usuario administrador inicial | Opcional |
 | `ADMIN_EMAIL` | Correo administrador inicial | Opcional |
-| `ADMIN_PASSWORD` | Credencial inicial segura | Opcional |
-
-Nota: En Fase 3 `backend/Dockerfile` respetara la variable dinamica `$PORT` corriendo bajo usuario sin privilegios.
+| `ADMIN_PASSWORD` | Credencial inicial segura (>= 12 chars, max 72B UTF-8) | Si en primer arranque |
 
 ---
 

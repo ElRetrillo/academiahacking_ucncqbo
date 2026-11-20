@@ -2,7 +2,7 @@
 
 **Base URL (Local):** `http://localhost:8000`
 **Documentacion OpenAPI Interactiva:** `/docs` (Swagger UI) y `/redoc` (ReDoc)
-**Estado del Contrato:** Documentacion actualizada tras el endurecimiento DevSecOps de Fase 3 en `backend/app/api/v1/`.
+**Estado del Contrato:** Documentacion actualizada tras el endurecimiento DevSecOps y refactorizacion SOLID de Fases 3 y 4 en `backend/app/api/v1/`.
 
 ---
 
@@ -16,9 +16,9 @@
 ### Formatos y Codigos de Estado
 
 - Content-Type de entrada y salida: `application/json` (UTF-8).
-- Fechas en formato ISO 8601 UTC (en `/api/ctf-academy` se serializan como epoch en milisegundos).
-- Errores estandar FastAPI (`400`, `401`, `403`, `404`, `422`, `429`): `{"detail": "Mensaje descriptivo"}`.
-- Limite de tasa (`429 Too Many Requests`): Incluye cabecera `Retry-After` en segundos en endpoints de autenticacion y envio de flags.
+- Fechas en formato ISO 8601 UTC (en `/api/ctf-academy` se serializan como epoch UTC en milisegundos).
+- Errores estandar FastAPI (`400`, `401`, `403`, `404`, `422`, `429`, `503`): `{"detail": "Mensaje descriptivo"}`.
+- Limite de tasa (`429 Too Many Requests`): Incluye cabecera `Retry-After` en segundos en endpoints de autenticacion y envio de flags, usando identificacion resistente a spoofing via `TRUSTED_PROXY_COUNT`.
 
 ---
 
@@ -26,13 +26,22 @@
 
 | Metodo | Ruta | Autenticacion | Descripcion |
 |---|---|---|---|
-| `GET` | `/` | No | Verificacion basica de estado |
-| `GET` | `/health` | No | Healthcheck configurado para Railway |
+| `GET` | `/` | No | Verificacion basica de proceso HTTP (`{"status": "ok"}`) |
+| `GET` | `/health` | No | Healthcheck con prueba real `SELECT 1` contra base de datos para Railway |
 
-Respuesta `200 OK`:
+Respuesta `GET /health` (`200 OK`):
 ```json
 {
-  "status": "ok"
+  "status": "ok",
+  "database": "ok"
+}
+```
+
+Respuesta ante indisponibilidad de base de datos (`503 Service Unavailable`):
+```json
+{
+  "status": "degraded",
+  "database": "error"
 }
 ```
 
@@ -41,19 +50,19 @@ Respuesta `200 OK`:
 ## 3. Autenticacion (`/api/v1/auth`)
 
 ### `POST /api/v1/auth/register`
-Registra una nueva cuenta de jugador (siempre con `role: "user"` salvo habilitacion explicita por configuracion). Sujeto a rate limiting.
+Registra una nueva cuenta de jugador (`role: "user"` por defecto; normaliza `email` a minusculas y `nationality` a mayusculas). Sujeto a rate limiting.
 
 - **Body (`RegisterRequest`)**:
   - `username`: string (3-50 caracteres, regex `^[a-zA-Z0-9_-]+$`)
-  - `email`: EmailStr
-  - `password`: string (6-100 caracteres)
+  - `email`: EmailStr (unico case-insensitive)
+  - `password`: string (minimo 6 caracteres, maximo 72 bytes UTF-8 por limite criptografico de bcrypt)
   - `nationality`: string (2-10 caracteres, default `"CL"`)
 - **Respuesta `201 Created` (`UserProfile`)**:
 ```json
 {
   "id": "uuid",
   "username": "jugador_ucn",
-  "email": "jugador@example.test",
+  "email": "jugador@example.com",
   "nationality": "CL",
   "role": "user",
   "score": 0,
@@ -65,7 +74,7 @@ Registra una nueva cuenta de jugador (siempre con `role: "user"` salvo habilitac
 ```
 
 ### `POST /api/v1/auth/login`
-Autentica por `username` o `email` y retorna `TokenResponse` (`typ="cli"`) para `eclipsecCLI` o servidor BFF. Sujeto a rate limiting.
+Autentica por `username` o `email` (case-insensitive en email) y retorna `TokenResponse` (`typ="cli"`) para `eclipsecCLI` o servidor BFF. Sujeto a rate limiting.
 
 - **Body (`LoginRequest`)**: `{"username_or_email": "...", "password": "..."}`
 - **Respuesta `200 OK` (`TokenResponse`)**: `{"access_token": "<token>", "token_type": "bearer", "user": { ... }}`
@@ -81,7 +90,7 @@ Autentica una sesion web emitiendo cookie `HttpOnly` (`eclipsec_session`) y cook
   "user": {
     "id": "uuid",
     "username": "jugador_ucn",
-    "email": "jugador@example.test",
+    "email": "jugador@example.com",
     "nationality": "CL",
     "role": "user",
     "score": 0,
@@ -94,17 +103,17 @@ Autentica una sesion web emitiendo cookie `HttpOnly` (`eclipsec_session`) y cook
 ```
 
 ### `POST /api/v1/auth/session/logout` y `POST /api/v1/auth/logout`
-Revoca el `jti` del token activo en la tabla `revoked_tokens` y elimina las cookies de sesion/CSRF. Si autentica mediante cookie, exige cabecera `X-CSRF-Token`.
+Revoca el `jti` del token activo en `revoked_tokens`, poda registros expirados y elimina las cookies de sesion/CSRF. Si autentica mediante cookie, exige cabecera `X-CSRF-Token`.
 
 - **Respuesta `200 OK` (`LogoutResponse`)**: `{"authenticated": false, "message": "Session closed."}`
 
 ### `GET /api/v1/auth/me`
 - **Autenticacion:** Requerida (cookie `HttpOnly` o `Bearer`).
-- **Respuesta `200 OK` (`UserProfileDetail`)**: Perfil privado completo del jugador autenticado, incluyendo `email`, `role`, `last_connected_at`, estadisticas, rango y ultimos 10 retos resueltos.
+- **Respuesta `200 OK` (`UserProfileDetail`)**: Perfil privado completo del jugador autenticado, incluyendo `email`, `role`, `last_connected_at`, estadisticas, rango unificado y ultimos 10 retos resueltos (con campos `snake_case` y `camelCase` via `@computed_field`).
 
 ### `PUT /api/v1/auth/me`
 - **Autenticacion:** Requerida (cookie `HttpOnly` + `X-CSRF-Token`, o `Bearer`).
-- **Body (`UserUpdate`)**: `nationality` (opcional), `current_password` (requerida si cambia password), `new_password` (opcional, 6-100 caracteres).
+- **Body (`UserUpdate`)**: `nationality` (opcional), `current_password` (requerida si cambia password), `new_password` (opcional, minimo 6 caracteres y maximo 72 bytes UTF-8).
 - **Respuesta `200 OK` (`UserProfile`)**.
 
 ---
@@ -137,7 +146,7 @@ Obtiene el detalle publico (`ChallengePublic`) de un reto activo buscando por UU
 ### `POST /api/v1/challenges/{challenge_id_or_slug}/submit`
 - **Autenticacion:** Requerida (cookie `HttpOnly` + `X-CSRF-Token`, o `Bearer`). Sujeto a rate limiting (`429` + `Retry-After`).
 - **Body (`FlagSubmissionRequest`)**: `{"flag": "EclipSec{...}"}`
-- **Comportamiento:** Verifica la flag en tiempo constante contra su resumen `HMAC-SHA256`, registra el hash del intento en `submissions` (nunca en texto plano) y evita doble puntuacion.
+- **Comportamiento:** Verifica la flag en tiempo constante contra su resumen `HMAC-SHA256`, registra el hash del intento en `submissions` (nunca en texto plano) y actualiza `solves_count` y `score` con incrementos atomicos SQL protegidos ante envios concurrentes.
 - **Respuesta `200 OK` (`FlagSubmissionResponse`)**:
 ```json
 {
@@ -162,13 +171,13 @@ Obtiene el detalle publico (`ChallengePublic`) de un reto activo buscando por UU
 
 ### `GET /api/v1/leaderboard`
 - **Query param:** `limit` (1 a 500, default `100`).
-- **Criterios de ordenamiento:** `score DESC`, `last_solve_at ASC NULLS LAST`, `created_at ASC`. Solo incluye cuentas activas con `role == "user"`.
+- **Criterios de ordenamiento:** `score DESC`, `last_solve_at ASC NULLS LAST`, `created_at ASC`, `id ASC`. Solo incluye cuentas activas con `role == "user"`.
 
 ### `GET /api/v1/leaderboard/countries`
 Retorna metricas agregadas por `nationality` (`total_players`, `total_score`, `total_solves`).
 
 ### `GET /api/v1/users/{username}/profile`
-Retorna `UserPublicProfileDetail` (sin `email`, `role`, `is_active` ni `last_connected_at`) con rango calculado segun puntaje (`Noob`, `Script Kiddie`, `Hacker`, `Pro Hacker`, `Elite Hacker`, `Guru`, `Omniscient`).
+Retorna `UserPublicProfileDetail` (sin `email`, `role`, `is_active` ni `last_connected_at`) con `global_rank` consistente con `/api/v1/leaderboard` y rango calculado segun puntaje (`Noob`, `Script Kiddie`, `Hacker`, `Pro Hacker`, `Elite Hacker`, `Guru`, `Omniscient`).
 
 ---
 
@@ -179,27 +188,27 @@ Todos los endpoints requieren usuario autenticado con `role == "admin"` (respond
 | Metodo | Ruta | Descripcion |
 |---|---|---|
 | `GET` | `/api/v1/admin/challenges` | Lista todos los retos con `flag: "[REDACTED]"` y `flag_configured: bool` |
-| `POST` | `/api/v1/admin/challenges` | Crea un reto almacenando resumen `HMAC-SHA256` (`ChallengeCreate`) |
+| `POST` | `/api/v1/admin/challenges` | Crea un reto validando `difficulty`, `category`, `target_url` segura (`/` o `http(s)`), `path` sin `..` y `flag` valida (`HMAC-SHA256`) |
 | `PUT` | `/api/v1/admin/challenges/{challenge_id}` | Actualiza campos o rota el hash de flag (`ChallengeUpdate`) |
-| `DELETE` | `/api/v1/admin/challenges/{challenge_id}` | Elimina un reto (`204 No Content`) |
+| `DELETE` | `/api/v1/admin/challenges/{challenge_id}` | Elimina un reto y sus relaciones en cascada (`204 No Content`) |
 | `GET` | `/api/v1/admin/users` | Lista todos los usuarios registrados con su `solves_count` |
-| `PUT` | `/api/v1/admin/users/{user_id}` | Actualiza `role`, `is_active`, `nationality` o `score` de un usuario |
+| `PUT` | `/api/v1/admin/users/{user_id}` | Actualiza `role` (`user`/`admin`), `is_active`, `nationality` o `score >= 0` (bloquea auto-desactivacion o auto-degradacion del admin autenticado) |
 
 ---
 
 ## 7. Adaptador Legacy (`POST /api/ctf-academy`)
 
-Mantiene compatibilidad con el contrato RPC historico mediante `{ "action": "...", ... }`, endurecido en Fase 3 con cookies `HttpOnly` + CSRF, rate limiting, revocacion real de `jti` y cero tokens expuestos en el payload JSON:
+Mantiene compatibilidad con el contrato RPC historico mediante `{ "action": "...", ... }`, respaldado por `CtfAcademyService` con cookies `HttpOnly` + CSRF, rate limiting, revocacion real de `jti`, ranking SQL unificado y timestamps UTC en milisegundos:
 
 | Accion | Parametros | Comportamiento Vigente |
 |---|---|---|
-| `register` | `username`, `password` (min 6) | Registra cuenta (`role: "user"`), emite cookies `HttpOnly` + CSRF y retorna estado sin `token` en JSON |
-| `login` | `username`, `password` | Autentica, emite cookies `HttpOnly` + CSRF y retorna estado sin `token` en JSON |
+| `register` | `username`, `password` (min 6, max 72B) | Registra cuenta (`role: "user"`), emite cookies `HttpOnly` + CSRF y retorna estado sin `token` en JSON |
+| `login` | `username`, `password` | Autentica de forma segura sin 500 por longitud, emite cookies `HttpOnly` + CSRF y retorna estado sin `token` en JSON |
 | `logout` | Cookie / Bearer (+ `X-CSRF-Token`) | Revoca `jti` en `revoked_tokens` y limpia cookies |
 | `state` | Cookie o `Authorization` opcional | Retorna `leaderboard` (top 50), `participants`, `currentUser` y `session` |
 | `complete` | `challengeId`, `flag` (+ `X-CSRF-Token` en cookie) | Valida flag con HMAC y retorna estado actualizado |
 
-Este endpoint permanece programado para retiro controlado tras la migracion completa hacia `/api/v1/*` en Fase 4-6.
+Este endpoint permanece programado para retiro controlado tras completar la integracion del frontend en Fase 6.
 
 ---
 

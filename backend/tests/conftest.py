@@ -10,7 +10,7 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from app.database import Base, get_db
+from app.database import Base, enable_sqlite_foreign_keys, get_db
 from app.main import app
 from app.models.challenge import Challenge
 from app.models.user import User
@@ -20,6 +20,7 @@ from app.services.security import REDACTED_FLAG_MARKER, create_access_token, has
 TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
 
 engine_test = create_async_engine(TEST_DATABASE_URL, connect_args={"check_same_thread": False})
+enable_sqlite_foreign_keys(engine_test)
 TestingSessionLocal = async_sessionmaker(bind=engine_test, class_=AsyncSession, expire_on_commit=False)
 
 

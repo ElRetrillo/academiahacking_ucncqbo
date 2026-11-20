@@ -1,20 +1,21 @@
 import pytest
 from httpx import AsyncClient
+
+from app.config import settings
 from app.models.challenge import Challenge
+from app.services.challenge_service import resolve_target_url
 
 
 @pytest.mark.asyncio
 async def test_list_and_get_challenges(client: AsyncClient, sample_challenge: Challenge, user_token: str):
-    # Unauthenticated list
     resp = await client.get("/api/v1/challenges")
     assert resp.status_code == 200
     challenges = resp.json()
     assert len(challenges) == 1
     assert challenges[0]["slug"] == "web-sample"
     assert challenges[0]["is_solved"] is False
-    assert "flag" not in challenges[0]  # Flag must NOT be leaked to public
+    assert "flag" not in challenges[0]
 
-    # Authenticated list
     headers = {"Authorization": f"Bearer {user_token}"}
     auth_resp = await client.get("/api/v1/challenges", headers=headers)
     assert auth_resp.status_code == 200
@@ -25,7 +26,6 @@ async def test_list_and_get_challenges(client: AsyncClient, sample_challenge: Ch
 async def test_submit_flag_lifecycle(client: AsyncClient, sample_challenge: Challenge, user_token: str):
     headers = {"Authorization": f"Bearer {user_token}"}
 
-    # 1. Submit incorrect flag
     bad_resp = await client.post(
         f"/api/v1/challenges/{sample_challenge.slug}/submit",
         json={"flag": "EclipSec{wrong_flag}"},
@@ -36,7 +36,6 @@ async def test_submit_flag_lifecycle(client: AsyncClient, sample_challenge: Chal
     assert bad_data["is_correct"] is False
     assert bad_data["points_awarded"] == 0
 
-    # 2. Submit correct flag
     good_resp = await client.post(
         f"/api/v1/challenges/{sample_challenge.slug}/submit",
         json={"flag": "EclipSec{sample_flag_test}"},
@@ -48,7 +47,6 @@ async def test_submit_flag_lifecycle(client: AsyncClient, sample_challenge: Chal
     assert good_data["points_awarded"] == sample_challenge.points
     assert good_data["new_total_score"] == sample_challenge.points
 
-    # 3. Submit again (duplicate prevention)
     dup_resp = await client.post(
         f"/api/v1/challenges/{sample_challenge.slug}/submit",
         json={"flag": "EclipSec{sample_flag_test}"},
@@ -57,10 +55,9 @@ async def test_submit_flag_lifecycle(client: AsyncClient, sample_challenge: Chal
     assert dup_resp.status_code == 200
     dup_data = dup_resp.json()
     assert dup_data["is_correct"] is True
-    assert dup_data["points_awarded"] == 0  # No extra points for re-solving
+    assert dup_data["points_awarded"] == 0
     assert "already solved" in dup_data["message"].lower()
 
-    # 4. Check that challenge now appears as is_solved=True in list
     list_resp = await client.get("/api/v1/challenges", headers=headers)
     assert list_resp.status_code == 200
     assert list_resp.json()[0]["is_solved"] is True
@@ -69,14 +66,12 @@ async def test_submit_flag_lifecycle(client: AsyncClient, sample_challenge: Chal
 
 @pytest.mark.asyncio
 async def test_challenge_filters_recent_and_categories(client: AsyncClient, sample_challenge: Challenge):
-    # 1. Test /challenges/recent
     recent_resp = await client.get("/api/v1/challenges/recent?limit=5")
     assert recent_resp.status_code == 200
     recent_list = recent_resp.json()
     assert len(recent_list) == 1
     assert recent_list[0]["slug"] == sample_challenge.slug
 
-    # 2. Test /challenges/categories
     cats_resp = await client.get("/api/v1/challenges/categories")
     assert cats_resp.status_code == 200
     cats_list = cats_resp.json()
@@ -84,7 +79,6 @@ async def test_challenge_filters_recent_and_categories(client: AsyncClient, samp
     assert cats_list[0]["category"] == "web"
     assert cats_list[0]["count"] == 1
 
-    # 3. Test filtering by category and difficulty
     filter_resp = await client.get("/api/v1/challenges?category=web&difficulty=EASY")
     assert filter_resp.status_code == 200
     assert len(filter_resp.json()) == 1
@@ -92,12 +86,6 @@ async def test_challenge_filters_recent_and_categories(client: AsyncClient, samp
     no_match_resp = await client.get("/api/v1/challenges?category=pwn")
     assert no_match_resp.status_code == 200
     assert len(no_match_resp.json()) == 0
-
-
-# ── target_url resolution against CHALLENGES_BASE_URL ────────────────────────
-
-from app.config import settings
-from app.services.challenge_service import resolve_target_url
 
 
 @pytest.mark.parametrize(
@@ -128,7 +116,7 @@ async def test_public_challenge_listing_serves_absolute_target_url(client: Async
             category="web",
             difficulty="EASY",
             points=10,
-            flag="EclipSec{x}",
+            flag="[REDACTED]",
             flag_hash="h",
             target_url="/web-900/",
             is_active=True,

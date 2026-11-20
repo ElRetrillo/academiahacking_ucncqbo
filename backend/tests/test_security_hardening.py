@@ -1,13 +1,18 @@
+from datetime import datetime, timedelta, timezone
+
 import pytest
 from httpx import AsyncClient
 from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.requests import Request
 
 from app.config import Settings, settings
 from app.models.challenge import Challenge
-from app.models.solve import Submission
+from app.models.solve import Solve, Submission
 from app.models.user import User
+from app.repositories import SqlAlchemyChallengeRepository, SqlAlchemyTokenRevocationRepository
+from app.services.rate_limiter import InMemorySlidingWindowRateLimiter, get_client_ip
 from app.services.security import REDACTED_FLAG_MARKER, hash_flag, verify_flag
 
 
@@ -37,6 +42,16 @@ def test_production_settings_fail_fast():
             FLAG_HMAC_SECRET="valid-production-hmac-secret-with-more-than-32-chars",
             CORS_ORIGINS=["https://eclipsec.cl"],
             CORS_ORIGIN_REGEX=r"^https:\/\/.*\.vercel\.app$",
+        )
+
+    with pytest.raises(ValidationError):
+        Settings(
+            ENVIRONMENT="production",
+            JWT_SECRET="valid-production-jwt-secret-with-more-than-32-chars",
+            FLAG_HMAC_SECRET="valid-production-hmac-secret-with-more-than-32-chars",
+            CORS_ORIGINS=["https://eclipsec.cl"],
+            COOKIE_SAMESITE="none",
+            COOKIE_SECURE=False,
         )
 
     valid = Settings(
@@ -187,6 +202,13 @@ async def test_ctf_academy_hardening_and_security_headers(
     assert short_pw.status_code == 400
     assert short_pw.json()["ok"] is False
 
+    short_login = await client.post(
+        "/api/ctf-academy",
+        json={"action": "login", "username": "ab", "password": "anypassword"},
+    )
+    assert short_login.status_code == 401
+    assert short_login.json()["ok"] is False
+
     reg_resp = await client.post(
         "/api/ctf-academy",
         json={"action": "register", "username": "academy_user", "password": "securepassword1"},
@@ -224,3 +246,233 @@ async def test_ctf_academy_hardening_and_security_headers(
     state_after_logout = await client.post("/api/ctf-academy", json={"action": "state"})
     assert state_after_logout.status_code == 200
     assert state_after_logout.json()["data"]["currentUser"] is None
+
+
+@pytest.mark.asyncio
+async def test_bcrypt_72_byte_limit_handled_safely(client: AsyncClient, regular_user: User, user_token: str):
+    over_ascii = "a" * 80
+    over_multibyte = "\u00e9" * 40
+
+    for idx, bad_pw in enumerate((over_ascii, over_multibyte)):
+        resp = await client.post(
+            "/api/v1/auth/register",
+            json={
+                "username": f"longpw_user_{idx}",
+                "email": f"longpw_{idx}@example.com",
+                "password": bad_pw,
+                "nationality": "CL",
+            },
+        )
+        assert resp.status_code == 422
+
+        acad_resp = await client.post(
+            "/api/ctf-academy",
+            json={"action": "register", "username": f"acad_long_{idx}", "password": bad_pw},
+        )
+        assert acad_resp.status_code == 400
+        assert acad_resp.json()["ok"] is False
+
+    update_resp = await client.put(
+        "/api/v1/auth/me",
+        json={"current_password": "playerpass123", "new_password": over_multibyte},
+        headers={"Authorization": f"Bearer {user_token}"},
+    )
+    assert update_resp.status_code == 422
+
+    login_resp = await client.post(
+        "/api/v1/auth/login",
+        json={"username_or_email": regular_user.username, "password": over_ascii},
+    )
+    assert login_resp.status_code == 401
+
+
+def test_trusted_proxy_client_ip_and_bounded_rate_limiter(monkeypatch):
+    request = Request(
+        scope={
+            "type": "http",
+            "method": "POST",
+            "path": "/api/v1/auth/login",
+            "client": ("10.0.0.1", 12345),
+            "headers": [(b"x-forwarded-for", b"198.51.100.10, 203.0.113.9")],
+        }
+    )
+
+    monkeypatch.setattr(settings, "TRUSTED_PROXY_COUNT", 0)
+    assert get_client_ip(request) == "10.0.0.1"
+
+    monkeypatch.setattr(settings, "TRUSTED_PROXY_COUNT", 1)
+    assert get_client_ip(request) == "203.0.113.9"
+
+    bounded_limiter = InMemorySlidingWindowRateLimiter(max_keys=3)
+    for k in ("k1", "k2", "k3", "k4"):
+        allowed, _ = bounded_limiter.check(k, limit=5, window_seconds=60)
+        assert allowed is True
+    assert len(bounded_limiter._buckets) == 3
+    assert "k1" not in bounded_limiter._buckets
+
+
+@pytest.mark.asyncio
+async def test_challenge_and_admin_validation_and_self_lockout_guard(
+    client: AsyncClient,
+    admin_user: User,
+    regular_user: User,
+    admin_token: str,
+):
+    headers = {"Authorization": f"Bearer {admin_token}"}
+    base_payload = {
+        "slug": "val-check",
+        "title": "Validation Check",
+        "description": "Challenge validation test",
+        "category": "WEB",
+        "difficulty": "hard",
+        "points": 100,
+        "flag": "EclipSec{valid_flag_1}",
+    }
+
+    invalid_variants = [
+        {"target_url": "javascript:alert(1)"},
+        {"target_url": "//evil.example/payload"},
+        {"flag": "   "},
+        {"flag": REDACTED_FLAG_MARKER},
+        {"difficulty": "IMPOSSIBLE"},
+        {"path": "../secret"},
+    ]
+    for patch in invalid_variants:
+        resp = await client.post("/api/v1/admin/challenges", json={**base_payload, **patch}, headers=headers)
+        assert resp.status_code == 422
+
+    ok_resp = await client.post("/api/v1/admin/challenges", json=base_payload, headers=headers)
+    assert ok_resp.status_code == 201
+    assert ok_resp.json()["category"] == "web"
+    assert ok_resp.json()["difficulty"] == "HARD"
+
+    bad_role = await client.put(
+        f"/api/v1/admin/users/{regular_user.id}",
+        json={"role": "superadmin"},
+        headers=headers,
+    )
+    assert bad_role.status_code == 422
+
+    negative_score = await client.put(
+        f"/api/v1/admin/users/{regular_user.id}",
+        json={"score": -10},
+        headers=headers,
+    )
+    assert negative_score.status_code == 422
+
+    self_deactivate = await client.put(
+        f"/api/v1/admin/users/{admin_user.id}",
+        json={"is_active": False},
+        headers=headers,
+    )
+    assert self_deactivate.status_code == 400
+
+    self_downgrade = await client.put(
+        f"/api/v1/admin/users/{admin_user.id}",
+        json={"role": "user"},
+        headers=headers,
+    )
+    assert self_downgrade.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_case_insensitive_email_dedup_and_token_revocation_pruning(
+    client: AsyncClient,
+    db_session: AsyncSession,
+):
+    reg1 = await client.post(
+        "/api/v1/auth/register",
+        json={
+            "username": "MixedUser",
+            "email": "MixedCase@Example.Com",
+            "password": "securepassword123",
+            "nationality": "cl",
+        },
+    )
+    assert reg1.status_code == 201
+    assert reg1.json()["email"] == "mixedcase@example.com"
+    assert reg1.json()["nationality"] == "CL"
+
+    reg2 = await client.post(
+        "/api/v1/auth/register",
+        json={
+            "username": "OtherUser",
+            "email": "MIXEDCASE@example.com",
+            "password": "securepassword123",
+            "nationality": "CL",
+        },
+    )
+    assert reg2.status_code == 400
+
+    login_mixed = await client.post(
+        "/api/v1/auth/login",
+        json={"username_or_email": "MIXEDCASE@EXAMPLE.COM", "password": "securepassword123"},
+    )
+    assert login_mixed.status_code == 200
+
+    repo = SqlAlchemyTokenRevocationRepository(db_session)
+    now = datetime.now(timezone.utc)
+    await repo.revoke("expired-jti", now - timedelta(hours=1))
+    await repo.revoke("active-jti", now + timedelta(hours=1))
+    await repo.revoke("active-jti", now + timedelta(hours=1))
+
+    assert await repo.is_revoked("active-jti") is True
+    assert await repo.is_revoked("expired-jti") is False
+
+
+@pytest.mark.asyncio
+async def test_sqlite_foreign_key_cascade_and_concurrent_solve_idempotency(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    regular_user: User,
+    sample_challenge: Challenge,
+    admin_token: str,
+):
+    solve = Solve(
+        user_id=regular_user.id,
+        challenge_id=sample_challenge.id,
+        points_awarded=sample_challenge.points,
+    )
+    db_session.add(solve)
+    await db_session.commit()
+
+    del_resp = await client.delete(
+        f"/api/v1/admin/challenges/{sample_challenge.id}",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert del_resp.status_code == 204
+
+    remaining = await db_session.execute(
+        select(Solve).where(Solve.challenge_id == sample_challenge.id)
+    )
+    assert remaining.scalar_one_or_none() is None
+
+    ch2 = Challenge(
+        slug="race-test",
+        title="Race Test",
+        description="Concurrency solve test",
+        category="web",
+        difficulty="EASY",
+        points=150,
+        flag=REDACTED_FLAG_MARKER,
+        flag_hash=hash_flag("EclipSec{race_ok}"),
+        is_active=True,
+        solves_count=0,
+    )
+    db_session.add(ch2)
+    await db_session.commit()
+    await db_session.refresh(ch2)
+
+    repo = SqlAlchemyChallengeRepository(db_session)
+    now = datetime.now(timezone.utc)
+    flag_digest = hash_flag("EclipSec{race_ok}")
+
+    awarded1, score1 = await repo.record_correct_solve(regular_user, ch2, flag_digest, now)
+    assert awarded1 is True
+    assert score1 == 150
+
+    awarded2, score2 = await repo.record_correct_solve(regular_user, ch2, flag_digest, now)
+    assert awarded2 is False
+    assert score2 == 150
+    await db_session.refresh(ch2)
+    assert ch2.solves_count == 1
