@@ -1,4 +1,6 @@
 import asyncio
+import json
+import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -8,12 +10,14 @@ if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
 from sqlalchemy import select
-from app.database import engine, AsyncSessionLocal, init_db
-from app.models.user import User
-from app.models.challenge import Challenge
-from app.models.solve import Solve, Submission
-from app.services.security import hash_password, hash_flag
+
 from app.config import settings
+from app.database import AsyncSessionLocal, init_db
+from app.models.challenge import Challenge
+from app.models.user import User
+from app.services.security import REDACTED_FLAG_MARKER, hash_flag, hash_password
+
+_DEFAULT_DEV_ADMIN_PASSWORDS = ("admin123456", "CHANGE_ME", "example_")
 
 CHALLENGES_DATA = [
     {
@@ -22,7 +26,7 @@ CHALLENGES_DATA = [
         "category": "web",
         "difficulty": "EASY",
         "points": 100,
-        "flag": "EclipSec{h1dd3n_1n_pl41n_s1ght}",
+        "default_flag": "EclipSec{h1dd3n_1n_pl41n_s1ght}",
         "description": "Find the hidden flag in the client source code and comments of the internal administration portal.",
         "target_url": "/web-001/",
         "hints": "Look inside HTML comments using Inspect Element (F12).",
@@ -33,7 +37,7 @@ CHALLENGES_DATA = [
         "category": "web",
         "difficulty": "EASY",
         "points": 100,
-        "flag": "EclipSec{r0b0ts_4r3_y0ur_fr13nd5}",
+        "default_flag": "EclipSec{r0b0ts_4r3_y0ur_fr13nd5}",
         "description": "Discover hidden endpoints that web crawlers are instructed not to index.",
         "target_url": "/web-002/",
         "hints": "Check standard web robot exclusion protocols at /robots.txt.",
@@ -44,7 +48,7 @@ CHALLENGES_DATA = [
         "category": "web",
         "difficulty": "EASY",
         "points": 150,
-        "flag": "EclipSec{c00k13_m0nst3r_m4n1pul4t10n}",
+        "default_flag": "EclipSec{c00k13_m0nst3r_m4n1pul4t10n}",
         "description": "Manipulate session cookies in your browser to escalate privileges to admin.",
         "target_url": "/web-003/",
         "hints": "Inspect the 'role' cookie in the Application tab of DevTools.",
@@ -55,7 +59,7 @@ CHALLENGES_DATA = [
         "category": "web",
         "difficulty": "MEDIUM",
         "points": 250,
-        "flag": "EclipSec{p1ng_0f_d34th_cmdi}",
+        "default_flag": "EclipSec{p1ng_0f_d34th_cmdi}",
         "description": "Exploit an unsanitized command injection flaw inside a network ping diagnostic tool.",
         "target_url": "/web-004/",
         "hints": "Use command separators like ; or && to chain shell commands (e.g. cat flag.txt).",
@@ -66,7 +70,7 @@ CHALLENGES_DATA = [
         "category": "web",
         "difficulty": "MEDIUM",
         "points": 300,
-        "flag": "EclipSec{l0c4l_f1l3_1nclus10n_m4st3r}",
+        "default_flag": "EclipSec{l0c4l_f1l3_1nclus10n_m4st3r}",
         "description": "Perform Local File Inclusion (LFI) to read sensitive system files on the host.",
         "target_url": "/web-005/",
         "hints": "Traverse directories using ../ to reach /flag.txt.",
@@ -77,7 +81,7 @@ CHALLENGES_DATA = [
         "category": "web",
         "difficulty": "MEDIUM",
         "points": 300,
-        "flag": "EclipSec{sql1_byp4ss_l0g1n}",
+        "default_flag": "EclipSec{sql1_byp4ss_l0g1n}",
         "description": "Bypass authentication on a vulnerable SQLite login form using classic SQL Injection.",
         "target_url": "/web-006/",
         "hints": "Craft an input that forces the WHERE condition to evaluate to true, e.g., ' OR 1=1 --",
@@ -88,7 +92,7 @@ CHALLENGES_DATA = [
         "category": "web",
         "difficulty": "MEDIUM",
         "points": 250,
-        "flag": "EclipSec{1d0r_c4n_b3_d4ng3r0us}",
+        "default_flag": "EclipSec{1d0r_c4n_b3_d4ng3r0us}",
         "description": "Access unauthorized user profile resources by altering direct object identifiers.",
         "target_url": "/web-007/",
         "hints": "Try modifying the ?id= query parameter to target administrative profile IDs.",
@@ -99,7 +103,7 @@ CHALLENGES_DATA = [
         "category": "web",
         "difficulty": "HARD",
         "points": 450,
-        "flag": "EclipSec{sst1_t3mpl4t3_1nj3ct10n}",
+        "default_flag": "EclipSec{sst1_t3mpl4t3_1nj3ct10n}",
         "description": "Exploit Jinja2 Server-Side Template Injection (SSTI) to inspect environment variables.",
         "target_url": "/web-008/",
         "hints": "Test template expressions like {{ 7*7 }} and investigate config / os.environ.",
@@ -110,7 +114,7 @@ CHALLENGES_DATA = [
         "category": "web",
         "difficulty": "EASY",
         "points": 150,
-        "flag": "EclipSec{b4ckup_f1l3s_4r3_l34ks}",
+        "default_flag": "EclipSec{b4ckup_f1l3s_4r3_l34ks}",
         "description": "Uncover backup files left behind by developers to expose hardcoded credentials.",
         "target_url": "/web-009/",
         "hints": "Common backup extensions include .bak, .old, ~, .swp.",
@@ -121,7 +125,7 @@ CHALLENGES_DATA = [
         "category": "web",
         "difficulty": "MEDIUM",
         "points": 250,
-        "flag": "EclipSec{h34d3rs_c4n_b3_sp00f3d}",
+        "default_flag": "EclipSec{h34d3rs_c4n_b3_sp00f3d}",
         "description": "Forge HTTP Request Headers (User-Agent and X-Forwarded-For) to satisfy server access controls.",
         "target_url": "/web-010/",
         "hints": "Set User-Agent to 'SecureBrowser1.0' and X-Forwarded-For to '127.0.0.1'.",
@@ -132,22 +136,19 @@ CHALLENGES_DATA = [
         "category": "web",
         "difficulty": "HARD",
         "points": 400,
-        "flag": "EclipSec{c0mm4nd_3x3cut10n_v1a_g3t}",
+        "default_flag": "EclipSec{c0mm4nd_3x3cut10n_v1a_g3t}",
         "description": "Perform Remote Command Execution through an unvalidated administrative GET query parameter.",
         "target_url": "/web-011/",
         "hints": "Use ?cmd=cat+flag.txt to dump the target flag.",
     },
     {
-        # First "local" challenge: downloaded from the public challenge repo and
-        # run by the participant with Docker via the EclipSec CLI. No public
-        # target_url — it is served on the player's own localhost:8080.
         "slug": "web-sqli-001",
         "title": "Login Bypass",
         "category": "web",
         "difficulty": "EASY",
         "points": 100,
         "version": "1.0",
-        "flag": "EclipSec{l0g1n_byp4ss_sqli_success_9f81a7}",
+        "default_flag": "EclipSec{l0g1n_byp4ss_sqli_success_9f81a7}",
         "description": "Bypass the login form of the SecureCorp admin portal and authenticate as admin to reveal the flag. Runs locally with the EclipSec CLI.",
         "target_url": None,
         "hints": "Analyze how the login query is built. What happens if the input is not treated as data?",
@@ -156,56 +157,91 @@ CHALLENGES_DATA = [
     },
 ]
 
-DEMO_USERS = [
-    {"username": "vortex_hacker", "email": "vortex@example.com", "nationality": "CL", "password": "password123"},
-    {"username": "cyber_pampa", "email": "pampa@example.com", "nationality": "AR", "password": "password123"},
-    {"username": "inca_sec", "email": "incasec@example.com", "nationality": "PE", "password": "password123"},
-    {"username": "aztec_guard", "email": "aztec@example.com", "nationality": "MX", "password": "password123"},
-    {"username": "iberian_pwn", "email": "iberian@example.com", "nationality": "ES", "password": "password123"},
-]
+
+def load_flag_overrides() -> dict[str, str]:
+    flags_file = settings.CHALLENGES_FLAGS_FILE.strip()
+    if not flags_file:
+        return {}
+    path = Path(flags_file)
+    if not path.is_file():
+        raise FileNotFoundError(f"CHALLENGES_FLAGS_FILE not found: {flags_file}")
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(raw, dict):
+        raise ValueError("CHALLENGES_FLAGS_FILE must contain a JSON object mapping slug -> flag.")
+    return {str(k): str(v).strip() for k, v in raw.items()}
 
 
-async def seed():
-    print("Initializing database tables...")
+def resolve_challenge_flag(slug: str, dev_default: str, file_overrides: dict[str, str]) -> str:
+    env_key = f"FLAG_{slug.upper().replace('-', '_')}"
+    env_val = os.environ.get(env_key, "").strip()
+    if env_val:
+        return env_val
+
+    file_val = file_overrides.get(slug, "").strip()
+    if file_val:
+        return file_val
+
+    if settings.ENVIRONMENT.lower() == "production":
+        raise RuntimeError(
+            f"Missing flag override for challenge '{slug}' in production ({env_key} or CHALLENGES_FLAGS_FILE)."
+        )
+    return dev_default
+
+
+async def ensure_admin_user(db) -> None:
+    admin_res = await db.execute(select(User).where(User.role == "admin").limit(1))
+    if admin_res.scalar_one_or_none():
+        return
+
+    password = settings.ADMIN_PASSWORD.strip()
+    is_prod = settings.ENVIRONMENT.lower() == "production"
+    is_weak_or_placeholder = len(password) < 12 or any(m in password for m in _DEFAULT_DEV_ADMIN_PASSWORDS)
+
+    if is_prod and is_weak_or_placeholder:
+        print("Skipping admin creation: configure a strong ADMIN_PASSWORD (12+ chars) in production.")
+        return
+
+    if not password:
+        return
+
+    now = datetime.now(timezone.utc)
+    admin = User(
+        username=settings.ADMIN_USERNAME,
+        email=settings.ADMIN_EMAIL,
+        hashed_password=hash_password(password),
+        role="admin",
+        nationality="CL",
+        score=0,
+        is_active=True,
+        created_at=now,
+        last_connected_at=now,
+    )
+    db.add(admin)
+    await db.commit()
+
+
+async def seed() -> None:
     await init_db()
+    file_overrides = load_flag_overrides()
 
     async with AsyncSessionLocal() as db:
-        # 1. Seed Admin User (Disabled: first registered user becomes admin)
-        # admin_res = await db.execute(select(User).where(User.username == settings.ADMIN_USERNAME))
-        # admin = admin_res.scalar_one_or_none()
-        # if not admin:
-        #     print(f"Creating default admin account: {settings.ADMIN_USERNAME} ({settings.ADMIN_EMAIL})")
-        #     admin = User(
-        #         username=settings.ADMIN_USERNAME,
-        #         email=settings.ADMIN_EMAIL,
-        #         hashed_password=hash_password(settings.ADMIN_PASSWORD),
-        #         role="admin",
-        #         nationality="CL",
-        #         score=0,
-        #         is_active=True,
-        #         created_at=datetime.now(timezone.utc),
-        #         last_connected_at=datetime.now(timezone.utc),
-        #     )
-        #     db.add(admin)
-        #     await db.commit()
-        #     print("✓ Admin user created.")
-        # else:
-        #     print("✓ Admin user already exists.")
+        await ensure_admin_user(db)
 
-        # 2. Seed Challenges
-        print("Seeding CTF challenges...")
         for ch_data in CHALLENGES_DATA:
             res = await db.execute(select(Challenge).where(Challenge.slug == ch_data["slug"]))
             existing_ch = res.scalar_one_or_none()
             if not existing_ch:
+                resolved_flag = resolve_challenge_flag(
+                    ch_data["slug"], ch_data["default_flag"], file_overrides
+                )
                 ch = Challenge(
                     slug=ch_data["slug"],
                     title=ch_data["title"],
                     category=ch_data["category"],
                     difficulty=ch_data["difficulty"],
                     points=ch_data["points"],
-                    flag=ch_data["flag"],
-                    flag_hash=hash_flag(ch_data["flag"]),
+                    flag=REDACTED_FLAG_MARKER,
+                    flag_hash=hash_flag(resolved_flag),
                     description=ch_data["description"],
                     target_url=ch_data.get("target_url"),
                     hints=ch_data.get("hints"),
@@ -217,78 +253,7 @@ async def seed():
                     created_at=datetime.now(timezone.utc),
                 )
                 db.add(ch)
-                print(f"  + Added challenge: {ch_data['slug']} - {ch_data['title']} ({ch_data['points']} pts)")
-            else:
-                print(f"  ✓ Challenge {ch_data['slug']} already exists.")
         await db.commit()
-
-        # 3. Seed Demo Users (Disabled: database starts with 0 users)
-        # print("Seeding demo players...")
-        # created_users = []
-        # for user_data in DEMO_USERS:
-        #     res = await db.execute(select(User).where(User.username == user_data["username"]))
-        #     existing_u = res.scalar_one_or_none()
-        #     if not existing_u:
-        #         u = User(
-        #             username=user_data["username"],
-        #             email=user_data["email"],
-        #             hashed_password=hash_password(user_data["password"]),
-        #             nationality=user_data["nationality"],
-        #             role="user",
-        #             score=0,
-        #             is_active=True,
-        #             created_at=datetime.now(timezone.utc),
-        #             last_connected_at=datetime.now(timezone.utc),
-        #         )
-        #         db.add(u)
-        #         await db.commit()
-        #         await db.refresh(u)
-        #         created_users.append(u)
-        #         print(f"  + Added demo player: {u.username} [{u.nationality}]")
-        #     else:
-        #         created_users.append(existing_u)
-        #
-        # # 4. Simulate a few initial solves for demo users
-        # web_001_res = await db.execute(select(Challenge).where(Challenge.slug == "web-001"))
-        # web_001 = web_001_res.scalar_one_or_none()
-        # web_002_res = await db.execute(select(Challenge).where(Challenge.slug == "web-002"))
-        # web_002 = web_002_res.scalar_one_or_none()
-        #
-        # if web_001 and created_users:
-        #     for player in created_users[:3]:
-        #         solve_check = await db.execute(
-        #             select(Solve).where(Solve.user_id == player.id, Solve.challenge_id == web_001.id)
-        #         )
-        #         if not solve_check.scalar_one_or_none():
-        #             solve = Solve(
-        #                 user_id=player.id,
-        #                 challenge_id=web_001.id,
-        #                 points_awarded=web_001.points,
-        #                 solved_at=datetime.now(timezone.utc),
-        #             )
-        #             db.add(solve)
-        #             player.score += web_001.points
-        #             web_001.solves_count += 1
-        #     await db.commit()
-        #
-        # if web_002 and len(created_users) >= 2:
-        #     top_player = created_users[0]
-        #     solve_check = await db.execute(
-        #         select(Solve).where(Solve.user_id == top_player.id, Solve.challenge_id == web_002.id)
-        #     )
-        #     if not solve_check.scalar_one_or_none():
-        #         solve = Solve(
-        #             user_id=top_player.id,
-        #             challenge_id=web_002.id,
-        #             points_awarded=web_002.points,
-        #             solved_at=datetime.now(timezone.utc),
-        #         )
-        #         db.add(solve)
-        #         top_player.score += web_002.points
-        #         web_002.solves_count += 1
-        #     await db.commit()
-
-        print("Seeding completed successfully!")
 
 
 if __name__ == "__main__":

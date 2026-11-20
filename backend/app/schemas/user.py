@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import Optional, Union
-from pydantic import BaseModel, EmailStr, Field, ConfigDict
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 
 class UserBase(BaseModel):
@@ -9,8 +9,8 @@ class UserBase(BaseModel):
     nationality: str
     role: str
     score: int
-    created_at: datetime  # Registration / start date
-    last_connected_at: datetime  # Last active telemetry
+    created_at: datetime
+    last_connected_at: datetime
     is_active: bool
 
 
@@ -36,7 +36,7 @@ class UserUpdate(BaseModel):
 
 
 class UserAdminUpdate(BaseModel):
-    role: Optional[str] = None  # "user" | "admin"
+    role: Optional[str] = None
     is_active: Optional[bool] = None
     nationality: Optional[str] = None
     score: Optional[int] = None
@@ -62,12 +62,10 @@ class RecentSolveDetail(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-class UserProfileDetail(BaseModel):
+class UserPublicProfileDetail(BaseModel):
     id: str
     username: str
-    email: EmailStr
     nationality: str
-    role: str
     score: int
     global_rank: Optional[Union[int, str]] = None
     globalRank: Optional[Union[int, str]] = None
@@ -75,10 +73,6 @@ class UserProfileDetail(BaseModel):
     rankName: Optional[str] = None
     created_at: datetime
     createdAt: Optional[datetime] = None
-    last_connected_at: datetime
-    lastConnectedAt: Optional[datetime] = None
-    is_active: bool
-    isActive: Optional[bool] = None
     solves_count: int
     solvesCount: Optional[int] = None
     solves_by_category: list[UserProfileSolvesBreakdown] = Field(default_factory=list)
@@ -87,3 +81,12 @@ class UserProfileDetail(BaseModel):
     recentSolves: list[RecentSolveDetail] = Field(default_factory=list)
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class UserProfileDetail(UserPublicProfileDetail):
+    email: EmailStr
+    role: str
+    last_connected_at: datetime
+    lastConnectedAt: Optional[datetime] = None
+    is_active: bool
+    isActive: Optional[bool] = None

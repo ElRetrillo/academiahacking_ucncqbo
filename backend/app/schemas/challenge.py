@@ -1,21 +1,19 @@
 from datetime import datetime
 from typing import Optional
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ChallengeBase(BaseModel):
     title: str = Field(..., min_length=2, max_length=100)
     description: str
-    category: str = Field(default="web", max_length=50)  # web, pwn, crypto, forensic, rev, osint, misc
-    difficulty: str = Field(default="EASY")  # EASY, MEDIUM, HARD, INSANE
+    category: str = Field(default="web", max_length=50)
+    difficulty: str = Field(default="EASY")
     points: int = Field(default=100, ge=1)
     target_url: Optional[str] = None
     hints: Optional[str] = None
-    # Local-challenge registry (public, non-sensitive): tells the CLI where to
-    # download the challenge from. Never contains secrets or flags.
     version: str = Field(default="1.0", max_length=20)
-    repository: Optional[str] = None  # "owner/repo" GitHub slug
-    path: Optional[str] = None  # directory inside the repo, e.g. "web/sqli-001"
+    repository: Optional[str] = None
+    path: Optional[str] = None
 
 
 class ChallengeCreate(ChallengeBase):
@@ -50,7 +48,8 @@ class ChallengePublic(ChallengeBase):
 class ChallengeAdmin(ChallengeBase):
     id: str
     slug: str
-    flag: str
+    flag: str = "[REDACTED]"
+    flag_configured: bool = True
     is_active: bool
     solves_count: int
     created_at: datetime
@@ -69,18 +68,7 @@ class FlagSubmissionResponse(BaseModel):
     new_total_score: int = 0
 
 
-# ──────────────────────────────────────────────────────────────
-# Challenge instances (local-execution sessions)
-# ──────────────────────────────────────────────────────────────
-
-
 class InstanceChallengeInfo(BaseModel):
-    """Download/run descriptor handed to the CLI when an instance starts.
-
-    Contains everything the CLI needs to fetch the challenge from the public
-    challenge repository and run it locally. Never includes the flag.
-    """
-
     id: str
     slug: str
     title: str
