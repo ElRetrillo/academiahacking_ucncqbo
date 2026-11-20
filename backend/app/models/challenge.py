@@ -1,49 +1,39 @@
-import uuid
-from datetime import datetime, timezone
-from sqlalchemy import Column, String, Integer, Boolean, DateTime, Text
+from sqlalchemy import Boolean, Column, DateTime, Index, Integer, String, Text
 from sqlalchemy.orm import relationship
+
 from app.database import Base
-
-
-def generate_uuid() -> str:
-    return str(uuid.uuid4())
-
-
-def utc_now() -> datetime:
-    return datetime.now(timezone.utc)
+from app.models.base_utils import generate_uuid, utc_now
 
 
 class Challenge(Base):
     __tablename__ = "challenges"
+    __table_args__ = (
+        Index("ix_challenges_active_category_difficulty", "is_active", "category", "difficulty"),
+    )
 
     id = Column(String(36), primary_key=True, default=generate_uuid, index=True)
     slug = Column(String(50), unique=True, index=True, nullable=False)
     title = Column(String(100), nullable=False)
     description = Column(Text, nullable=False)
-    category = Column(String(50), default="web", nullable=False)  # web, pwn, crypto, forensic, rev, osint, misc
-    difficulty = Column(String(20), default="EASY", nullable=False)  # EASY, MEDIUM, HARD, INSANE
+    category = Column(String(50), default="web", nullable=False)
+    difficulty = Column(String(20), default="EASY", nullable=False)
     points = Column(Integer, default=100, nullable=False)
-    
-    # Flag validation
-    flag = Column(String(255), nullable=False)  # Plain/Standard format e.g. EclipSec{...}
-    flag_hash = Column(String(64), nullable=True)  # SHA-256 hash for fast constant-time verification
-    
-    # Instance URL / endpoint
-    target_url = Column(String(255), nullable=True)  # e.g., /web-001/ or http://host:8001
-    hints = Column(Text, nullable=True)  # Optional JSON or plaintext hints
-    
-    # Local-challenge registry: where the CLI downloads this challenge from.
-    # repository is a "owner/repo" GitHub slug, path is the directory inside it.
-    version = Column(String(20), default="1.0", nullable=False)  # e.g. "1.0"
-    repository = Column(String(255), nullable=True)  # e.g. "ElRetrillo/retos_ctf"
-    path = Column(String(255), nullable=True)  # e.g. "web/sqli-001"
+
+    flag = Column(String(255), nullable=False)
+    flag_hash = Column(String(64), nullable=True)
+
+    target_url = Column(String(255), nullable=True)
+    hints = Column(Text, nullable=True)
+
+    version = Column(String(20), default="1.0", nullable=False)
+    repository = Column(String(255), nullable=True)
+    path = Column(String(255), nullable=True)
 
     is_active = Column(Boolean, default=True, nullable=False)
     solves_count = Column(Integer, default=0, nullable=False)
     created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
     updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)
 
-    # Relationships
     solves = relationship("Solve", back_populates="challenge", cascade="all, delete-orphan")
     submissions = relationship("Submission", back_populates="challenge", cascade="all, delete-orphan")
     instances = relationship("ChallengeInstance", back_populates="challenge", cascade="all, delete-orphan")

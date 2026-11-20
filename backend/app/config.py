@@ -1,5 +1,6 @@
 from pathlib import Path
 from typing import List, Optional, Union
+
 from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -8,6 +9,7 @@ DEFAULT_DATABASE_URL = f"sqlite+aiosqlite:///{(BACKEND_DIR / 'ctf.db').as_posix(
 
 _DEV_JWT_MARKERS = ("change-this-in-production", "example_", "CHANGE_ME")
 _DEV_HMAC_MARKERS = ("dev-only", "example_", "CHANGE_ME")
+_ALLOWED_SAMESITE_VALUES = {"lax", "strict", "none"}
 
 
 class Settings(BaseSettings):
@@ -16,6 +18,8 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = "development"
 
     DATABASE_URL: str = DEFAULT_DATABASE_URL
+    DB_ECHO: bool = False
+    AUTO_SEED_ENABLED: bool = True
 
     JWT_SECRET: str = "change-this-in-production-super-secret-ctf-key-2026"
     FLAG_HMAC_SECRET: str = "dev-only-flag-hmac-secret-replace-in-production"
@@ -38,6 +42,7 @@ class Settings(BaseSettings):
     COOKIE_DOMAIN: Optional[str] = None
 
     ALLOW_FIRST_USER_ADMIN: bool = False
+    TRUSTED_PROXY_COUNT: int = 0
 
     RATE_LIMIT_ENABLED: bool = True
     RATE_LIMIT_AUTH_MAX: int = 10
@@ -85,9 +90,24 @@ class Settings(BaseSettings):
     def assemble_cors_origins(cls, v: Union[str, List[str]]) -> List[str]:
         if isinstance(v, str) and not v.startswith("["):
             return [i.strip() for i in v.split(",") if i.strip()]
-        elif isinstance(v, (list, str)):
+        if isinstance(v, (list, str)):
             return v
         return []
+
+    @field_validator("COOKIE_SAMESITE", mode="before")
+    @classmethod
+    def validate_cookie_samesite(cls, v: str) -> str:
+        normalized = str(v).strip().lower()
+        if normalized not in _ALLOWED_SAMESITE_VALUES:
+            raise ValueError("COOKIE_SAMESITE must be one of: lax, strict, none.")
+        return normalized
+
+    @field_validator("TRUSTED_PROXY_COUNT")
+    @classmethod
+    def validate_trusted_proxy_count(cls, v: int) -> int:
+        if v < 0:
+            raise ValueError("TRUSTED_PROXY_COUNT must be non-negative.")
+        return v
 
     @model_validator(mode="after")
     def validate_production_security(self) -> "Settings":
@@ -105,6 +125,9 @@ class Settings(BaseSettings):
 
         if self.CORS_ORIGIN_REGEX and r".*\.vercel\.app" in self.CORS_ORIGIN_REGEX:
             raise ValueError("CORS_ORIGIN_REGEX cannot allow arbitrary vercel.app subdomains in production.")
+
+        if self.COOKIE_SAMESITE == "none" and not self.cookie_secure_effective:
+            raise ValueError("COOKIE_SAMESITE='none' requires Secure cookies in production.")
 
         return self
 

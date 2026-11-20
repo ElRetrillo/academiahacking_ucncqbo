@@ -1,5 +1,6 @@
 from datetime import datetime
-from typing import Optional, List
+from typing import List, Optional
+
 from pydantic import BaseModel
 
 
@@ -10,8 +11,8 @@ class LeaderboardEntry(BaseModel):
     nationality: str
     score: int
     solves_count: int
-    start_date: datetime  # User registration date
-    last_connected_at: datetime  # Last active telemetry
+    start_date: datetime
+    last_connected_at: datetime
     last_solve_at: Optional[datetime] = None
 
 

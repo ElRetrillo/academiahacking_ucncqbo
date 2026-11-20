@@ -1,6 +1,6 @@
 import math
 import time
-from collections import deque
+from collections import OrderedDict, deque
 from typing import Protocol
 
 from fastapi import HTTPException, Request, status
@@ -17,18 +17,40 @@ class RateLimiter(Protocol):
 
 
 class InMemorySlidingWindowRateLimiter:
-    """Sliding-window in-memory rate limiter for auth and flag submission endpoints."""
+    """Bounded-memory sliding-window rate limiter for auth and flag submission endpoints."""
 
-    def __init__(self) -> None:
-        self._buckets: dict[str, deque[float]] = {}
+    def __init__(self, max_keys: int = 10_000) -> None:
+        self._max_keys = max(1, max_keys)
+        self._buckets: OrderedDict[str, deque[float]] = OrderedDict()
+        self._windows: dict[str, int] = {}
+
+    def _prune_expired(self, now: float, window_seconds: int) -> None:
+        for existing_key, bucket in list(self._buckets.items()):
+            ttl = self._windows.get(existing_key, window_seconds)
+            cutoff = now - ttl
+            while bucket and bucket[0] <= cutoff:
+                bucket.popleft()
+            if not bucket:
+                self._buckets.pop(existing_key, None)
+                self._windows.pop(existing_key, None)
 
     def check(self, key: str, limit: int, window_seconds: int) -> tuple[bool, int]:
         now = time.monotonic()
         cutoff = now - window_seconds
         bucket = self._buckets.get(key)
+
         if bucket is None:
+            if len(self._buckets) >= self._max_keys:
+                self._prune_expired(now, window_seconds)
+            while len(self._buckets) >= self._max_keys:
+                oldest_key, _ = self._buckets.popitem(last=False)
+                self._windows.pop(oldest_key, None)
             bucket = deque()
             self._buckets[key] = bucket
+        else:
+            self._buckets.move_to_end(key)
+
+        self._windows[key] = window_seconds
 
         while bucket and bucket[0] <= cutoff:
             bucket.popleft()
@@ -42,17 +64,21 @@ class InMemorySlidingWindowRateLimiter:
 
     def reset(self) -> None:
         self._buckets.clear()
+        self._windows.clear()
 
 
 rate_limiter = InMemorySlidingWindowRateLimiter()
 
 
 def get_client_ip(request: Request) -> str:
-    forwarded_for = request.headers.get("X-Forwarded-For", "")
-    if forwarded_for:
-        first_ip = forwarded_for.split(",")[0].strip()
-        if first_ip:
-            return first_ip
+    trusted_proxies = settings.TRUSTED_PROXY_COUNT
+    if trusted_proxies > 0:
+        forwarded_for = request.headers.get("X-Forwarded-For", "")
+        if forwarded_for:
+            ips = [part.strip() for part in forwarded_for.split(",") if part.strip()]
+            if ips:
+                idx = -trusted_proxies if len(ips) >= trusted_proxies else 0
+                return ips[idx]
     if request.client and request.client.host:
         return request.client.host
     return "unknown"

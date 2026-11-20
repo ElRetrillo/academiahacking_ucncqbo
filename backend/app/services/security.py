@@ -11,6 +11,7 @@ from jose import JWTError, jwt
 from app.config import settings
 
 REDACTED_FLAG_MARKER = "[REDACTED]"
+MAX_BCRYPT_PASSWORD_BYTES = 72
 
 
 class FlagVerifier(Protocol):
@@ -59,15 +60,26 @@ _default_flag_verifier = HmacFlagVerifier()
 
 
 def hash_password(password: str) -> str:
+    encoded = password.encode("utf-8")
+    if len(encoded) > MAX_BCRYPT_PASSWORD_BYTES:
+        raise ValueError("Password exceeds maximum length of 72 UTF-8 bytes.")
     salt = bcrypt.gensalt()
-    return bcrypt.hashpw(password.encode("utf-8"), salt).decode("utf-8")
+    return bcrypt.hashpw(encoded, salt).decode("utf-8")
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     try:
-        return bcrypt.checkpw(plain_password.encode("utf-8"), hashed_password.encode("utf-8"))
+        encoded = plain_password.encode("utf-8")
+        if len(encoded) > MAX_BCRYPT_PASSWORD_BYTES:
+            return False
+        return bcrypt.checkpw(encoded, hashed_password.encode("utf-8"))
     except Exception:
         return False
+
+
+def to_utc_millis(dt: datetime) -> int:
+    normalized = dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt.astimezone(timezone.utc)
+    return int(normalized.timestamp() * 1000)
 
 
 def hash_flag(flag: str, secret: Optional[str] = None) -> str:

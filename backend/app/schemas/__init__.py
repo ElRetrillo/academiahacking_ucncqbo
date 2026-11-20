@@ -1,27 +1,51 @@
-from app.schemas.auth import RegisterRequest, LoginRequest, TokenResponse
-from app.schemas.user import UserProfile, UserUpdate, UserAdminUpdate
+from app.schemas.auth import (
+    LoginRequest,
+    LogoutResponse,
+    RegisterRequest,
+    SessionResponse,
+    TokenResponse,
+)
 from app.schemas.challenge import (
+    ALLOWED_DIFFICULTIES,
+    ChallengeAdmin,
     ChallengeBase,
     ChallengeCreate,
-    ChallengeUpdate,
+    ChallengeInstanceResponse,
     ChallengePublic,
-    ChallengeAdmin,
+    ChallengeUpdate,
     FlagSubmissionRequest,
     FlagSubmissionResponse,
+    InstanceChallengeInfo,
 )
 from app.schemas.leaderboard import (
-    LeaderboardEntry,
     CountryLeaderboardEntry,
+    LeaderboardEntry,
     LeaderboardResponse,
+)
+from app.schemas.user import (
+    RecentSolveDetail,
+    UserAdminUpdate,
+    UserProfile,
+    UserProfileDetail,
+    UserProfileSolvesBreakdown,
+    UserPublicProfileDetail,
+    UserUpdate,
 )
 
 __all__ = [
+    "ALLOWED_DIFFICULTIES",
     "RegisterRequest",
     "LoginRequest",
     "TokenResponse",
+    "SessionResponse",
+    "LogoutResponse",
     "UserProfile",
     "UserUpdate",
     "UserAdminUpdate",
+    "UserProfileSolvesBreakdown",
+    "RecentSolveDetail",
+    "UserPublicProfileDetail",
+    "UserProfileDetail",
     "ChallengeBase",
     "ChallengeCreate",
     "ChallengeUpdate",
@@ -29,6 +53,8 @@ __all__ = [
     "ChallengeAdmin",
     "FlagSubmissionRequest",
     "FlagSubmissionResponse",
+    "InstanceChallengeInfo",
+    "ChallengeInstanceResponse",
     "LeaderboardEntry",
     "CountryLeaderboardEntry",
     "LeaderboardResponse",
