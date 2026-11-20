@@ -1,10 +1,13 @@
 from pathlib import Path
-from typing import List, Union
-from pydantic import field_validator
+from typing import List, Optional, Union
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent
 DEFAULT_DATABASE_URL = f"sqlite+aiosqlite:///{(BACKEND_DIR / 'ctf.db').as_posix()}"
+
+_DEV_JWT_MARKERS = ("change-this-in-production", "example_", "CHANGE_ME")
+_DEV_HMAC_MARKERS = ("dev-only", "example_", "CHANGE_ME")
 
 
 class Settings(BaseSettings):
@@ -15,8 +18,10 @@ class Settings(BaseSettings):
     DATABASE_URL: str = DEFAULT_DATABASE_URL
 
     JWT_SECRET: str = "change-this-in-production-super-secret-ctf-key-2026"
+    FLAG_HMAC_SECRET: str = "dev-only-flag-hmac-secret-replace-in-production"
     JWT_ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
+    CLI_TOKEN_EXPIRE_MINUTES: int = 60 * 12
 
     CORS_ORIGINS: Union[List[str], str] = [
         "http://localhost:3000",
@@ -24,11 +29,25 @@ class Settings(BaseSettings):
         "https://eclipsec.cl",
         "https://www.eclipsec.cl",
     ]
+    CORS_ORIGIN_REGEX: str = ""
 
-    CORS_ORIGIN_REGEX: str = r"^https:\/\/.*\.vercel\.app$"
+    COOKIE_NAME: str = "eclipsec_session"
+    CSRF_COOKIE_NAME: str = "eclipsec_csrf"
+    COOKIE_SECURE: Optional[bool] = None
+    COOKIE_SAMESITE: str = "lax"
+    COOKIE_DOMAIN: Optional[str] = None
+
+    ALLOW_FIRST_USER_ADMIN: bool = False
+
+    RATE_LIMIT_ENABLED: bool = True
+    RATE_LIMIT_AUTH_MAX: int = 10
+    RATE_LIMIT_AUTH_WINDOW_SECONDS: int = 60
+    RATE_LIMIT_FLAG_MAX: int = 15
+    RATE_LIMIT_FLAG_WINDOW_SECONDS: int = 60
 
     CHALLENGES_BASE_URL: str = ""
     CHALLENGES_REPOSITORY: str = "ElRetrillo/retos_ctf"
+    CHALLENGES_FLAGS_FILE: str = ""
 
     ADMIN_USERNAME: str = "admin"
     ADMIN_EMAIL: str = "admin@eclipsec.cl"
@@ -40,6 +59,12 @@ class Settings(BaseSettings):
         case_sensitive=True,
         extra="ignore",
     )
+
+    @property
+    def cookie_secure_effective(self) -> bool:
+        if self.COOKIE_SECURE is not None:
+            return self.COOKIE_SECURE
+        return self.ENVIRONMENT.lower() == "production"
 
     @field_validator("DATABASE_URL", mode="before")
     @classmethod
@@ -63,6 +88,25 @@ class Settings(BaseSettings):
         elif isinstance(v, (list, str)):
             return v
         return []
+
+    @model_validator(mode="after")
+    def validate_production_security(self) -> "Settings":
+        if self.ENVIRONMENT.lower() != "production":
+            return self
+
+        if len(self.JWT_SECRET) < 32 or any(m in self.JWT_SECRET for m in _DEV_JWT_MARKERS):
+            raise ValueError("JWT_SECRET must be at least 32 characters and not a default placeholder in production.")
+
+        if len(self.FLAG_HMAC_SECRET) < 32 or any(m in self.FLAG_HMAC_SECRET for m in _DEV_HMAC_MARKERS):
+            raise ValueError("FLAG_HMAC_SECRET must be at least 32 characters and not a default placeholder in production.")
+
+        if "*" in self.CORS_ORIGINS:
+            raise ValueError("CORS_ORIGINS cannot contain wildcard '*' when allow_credentials is enabled.")
+
+        if self.CORS_ORIGIN_REGEX and r".*\.vercel\.app" in self.CORS_ORIGIN_REGEX:
+            raise ValueError("CORS_ORIGIN_REGEX cannot allow arbitrary vercel.app subdomains in production.")
+
+        return self
 
 
 settings = Settings()
