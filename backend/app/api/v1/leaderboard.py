@@ -1,9 +1,7 @@
-from typing import List
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import get_db
-from app.schemas.leaderboard import LeaderboardResponse, CountryLeaderboardEntry
+from app.api.deps import get_leaderboard_service
+from app.schemas.leaderboard import CountryLeaderboardEntry, LeaderboardResponse
 from app.services.leaderboard_service import LeaderboardService
 
 router = APIRouter(prefix="/leaderboard", tags=["Leaderboard"])
@@ -12,18 +10,15 @@ router = APIRouter(prefix="/leaderboard", tags=["Leaderboard"])
 @router.get("", response_model=LeaderboardResponse)
 async def get_leaderboard(
     limit: int = Query(default=100, ge=1, le=500),
-    db: AsyncSession = Depends(get_db),
+    leaderboard_service: LeaderboardService = Depends(get_leaderboard_service),
 ):
-    """
-    Get live player rankings sorted by:
-    1. Score (DESC)
-    2. Last solve timestamp (ASC, earlier solve wins tiebreaker)
-    3. User start date (ASC)
-    """
-    return await LeaderboardService.get_global_leaderboard(db, limit=limit)
+    """Get live player rankings sorted by score, earliest last solve time, and registration date."""
+    return await leaderboard_service.get_global_leaderboard(limit=limit)
 
 
-@router.get("/countries", response_model=List[CountryLeaderboardEntry])
-async def get_countries_leaderboard(db: AsyncSession = Depends(get_db)):
+@router.get("/countries", response_model=list[CountryLeaderboardEntry])
+async def get_countries_leaderboard(
+    leaderboard_service: LeaderboardService = Depends(get_leaderboard_service),
+):
     """Get aggregated statistics by player nationality."""
-    return await LeaderboardService.get_country_leaderboard(db)
+    return await leaderboard_service.get_country_leaderboard()

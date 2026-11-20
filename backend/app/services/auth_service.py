@@ -1,25 +1,24 @@
 from datetime import datetime, timezone
+
 from fastapi import HTTPException, status
-from sqlalchemy import func, or_, select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.exc import IntegrityError
 
 from app.config import settings
-from app.models.solve import Solve
 from app.models.user import User
+from app.repositories.protocols import UserRepositoryProtocol
 from app.schemas.auth import LoginRequest, RegisterRequest, TokenResponse
 from app.schemas.user import UserProfile, UserUpdate
 from app.services.security import create_access_token, hash_password, verify_password
 
 
 class AuthService:
-    @staticmethod
-    async def register_user(db: AsyncSession, req: RegisterRequest) -> User:
-        query = select(User).where(or_(User.username == req.username, User.email == req.email))
-        result = await db.execute(query)
-        existing_user = result.scalar_one_or_none()
+    def __init__(self, user_repo: UserRepositoryProtocol) -> None:
+        self._user_repo = user_repo
 
+    async def register_user(self, req: RegisterRequest) -> User:
+        existing_user = await self._user_repo.find_conflicting_user(req.username, str(req.email))
         if existing_user:
-            if existing_user.username == req.username:
+            if existing_user.username.lower() == req.username.lower():
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Username is already registered.",
@@ -30,15 +29,13 @@ class AuthService:
             )
 
         role = "user"
-        if settings.ALLOW_FIRST_USER_ADMIN:
-            count_res = await db.execute(select(func.count()).select_from(User))
-            if (count_res.scalar() or 0) == 0:
-                role = "admin"
+        if settings.ALLOW_FIRST_USER_ADMIN and await self._user_repo.count_all() == 0:
+            role = "admin"
 
         now = datetime.now(timezone.utc)
         new_user = User(
             username=req.username,
-            email=req.email,
+            email=str(req.email).lower(),
             hashed_password=hash_password(req.password),
             nationality=req.nationality.upper(),
             role=role,
@@ -47,23 +44,26 @@ class AuthService:
             created_at=now,
             last_connected_at=now,
         )
-        db.add(new_user)
-        await db.commit()
-        await db.refresh(new_user)
-        return new_user
+        try:
+            return await self._user_repo.create(new_user)
+        except IntegrityError as exc:
+            conflict = await self._user_repo.find_conflicting_user(req.username, str(req.email))
+            if conflict and conflict.username.lower() == req.username.lower():
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Username is already registered.",
+                ) from exc
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Email is already registered.",
+            ) from exc
 
-    @staticmethod
     async def authenticate_user(
-        db: AsyncSession,
+        self,
         req: LoginRequest,
         token_type: str = "cli",
     ) -> TokenResponse:
-        query = select(User).where(
-            or_(User.username == req.username_or_email, User.email == req.username_or_email)
-        )
-        result = await db.execute(query)
-        user = result.scalar_one_or_none()
-
+        user = await self._user_repo.get_by_username_or_email(req.username_or_email)
         if not user or not verify_password(req.password, user.hashed_password):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -77,38 +77,13 @@ class AuthService:
                 detail="User account is deactivated.",
             )
 
-        user.last_connected_at = datetime.now(timezone.utc)
-        await db.commit()
-        await db.refresh(user)
-
-        solves_res = await db.execute(
-            select(func.count()).select_from(Solve).where(Solve.user_id == user.id)
-        )
-        solves_count = solves_res.scalar() or 0
-
-        user_profile = UserProfile(
-            id=user.id,
-            username=user.username,
-            email=user.email,
-            nationality=user.nationality,
-            role=user.role,
-            score=user.score,
-            created_at=user.created_at,
-            last_connected_at=user.last_connected_at,
-            is_active=user.is_active,
-            solves_count=solves_count,
-        )
-
+        await self._user_repo.touch_last_connected(user, datetime.now(timezone.utc))
+        user_profile = await self.get_user_profile(user)
         access_token = create_access_token(subject=user.id, token_type=token_type)
         return TokenResponse(access_token=access_token, user=user_profile)
 
-    @staticmethod
-    async def get_user_profile(db: AsyncSession, user: User) -> UserProfile:
-        solves_res = await db.execute(
-            select(func.count()).select_from(Solve).where(Solve.user_id == user.id)
-        )
-        solves_count = solves_res.scalar() or 0
-
+    async def get_user_profile(self, user: User) -> UserProfile:
+        solves_count = await self._user_repo.get_solves_count(user.id)
         return UserProfile(
             id=user.id,
             username=user.username,
@@ -122,8 +97,7 @@ class AuthService:
             solves_count=solves_count,
         )
 
-    @staticmethod
-    async def update_profile(db: AsyncSession, user: User, req: UserUpdate) -> UserProfile:
+    async def update_profile(self, user: User, req: UserUpdate) -> UserProfile:
         if req.nationality:
             user.nationality = req.nationality.upper()
 
@@ -135,6 +109,5 @@ class AuthService:
                 )
             user.hashed_password = hash_password(req.new_password)
 
-        await db.commit()
-        await db.refresh(user)
-        return await AuthService.get_user_profile(db, user)
+        updated_user = await self._user_repo.save(user)
+        return await self.get_user_profile(updated_user)

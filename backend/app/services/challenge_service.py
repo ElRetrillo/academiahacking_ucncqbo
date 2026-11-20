@@ -1,15 +1,14 @@
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import Optional
 
 from fastapi import HTTPException, status
-from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.exc import IntegrityError
 
 from app.config import settings
 from app.models.challenge import Challenge
-from app.models.instance import ChallengeInstance, STATUS_RUNNING, STATUS_STOPPED
-from app.models.solve import Solve, Submission
+from app.models.instance import ChallengeInstance
 from app.models.user import User
+from app.repositories.protocols import ChallengeRepositoryProtocol
 from app.schemas.challenge import (
     ChallengeAdmin,
     ChallengeCreate,
@@ -19,7 +18,7 @@ from app.schemas.challenge import (
     FlagSubmissionResponse,
     InstanceChallengeInfo,
 )
-from app.services.security import REDACTED_FLAG_MARKER, hash_flag, verify_flag
+from app.services.security import REDACTED_FLAG_MARKER, FlagVerifier, hash_flag
 
 
 def resolve_target_url(target_url: Optional[str]) -> Optional[str]:
@@ -72,88 +71,61 @@ def to_admin(ch: Challenge) -> ChallengeAdmin:
 
 
 class ChallengeService:
-    @staticmethod
+    def __init__(
+        self,
+        challenge_repo: ChallengeRepositoryProtocol,
+        flag_verifier: FlagVerifier,
+    ) -> None:
+        self._challenge_repo = challenge_repo
+        self._flag_verifier = flag_verifier
+
     async def get_public_challenges(
-        db: AsyncSession,
+        self,
         user: Optional[User] = None,
         category: Optional[str] = None,
         difficulty: Optional[str] = None,
-    ) -> List[ChallengePublic]:
-        query = select(Challenge).where(Challenge.is_active == True)
-        if category:
-            query = query.where(Challenge.category == category.lower())
-        if difficulty:
-            query = query.where(Challenge.difficulty == difficulty.upper())
+    ) -> list[ChallengePublic]:
+        challenges = await self._challenge_repo.list_active(category=category, difficulty=difficulty)
+        solved_ids = (
+            await self._challenge_repo.get_solved_challenge_ids(user.id) if user else set()
+        )
+        return [to_public(ch, is_solved=(ch.id in solved_ids)) for ch in challenges]
 
-        query = query.order_by(Challenge.points.asc(), Challenge.slug.asc())
-        result = await db.execute(query)
-        challenges = result.scalars().all()
-
-        solved_challenge_ids = set()
-        if user:
-            solves_res = await db.execute(select(Solve.challenge_id).where(Solve.user_id == user.id))
-            solved_challenge_ids = set(solves_res.scalars().all())
-
-        return [to_public(ch, is_solved=(ch.id in solved_challenge_ids)) for ch in challenges]
-
-    @staticmethod
     async def get_recent_challenges(
-        db: AsyncSession,
+        self,
         user: Optional[User] = None,
         limit: int = 5,
-    ) -> List[ChallengePublic]:
-        query = select(Challenge).where(Challenge.is_active == True).order_by(Challenge.created_at.desc()).limit(limit)
-        result = await db.execute(query)
-        challenges = result.scalars().all()
-
-        solved_challenge_ids = set()
-        if user:
-            solves_res = await db.execute(select(Solve.challenge_id).where(Solve.user_id == user.id))
-            solved_challenge_ids = set(solves_res.scalars().all())
-
-        return [to_public(ch, is_solved=(ch.id in solved_challenge_ids)) for ch in challenges]
-
-    @staticmethod
-    async def get_category_summary(db: AsyncSession) -> List[dict]:
-        query = (
-            select(Challenge.category, func.count(Challenge.id).label("count"))
-            .where(Challenge.is_active == True)
-            .group_by(Challenge.category)
-            .order_by(Challenge.category.asc())
+    ) -> list[ChallengePublic]:
+        challenges = await self._challenge_repo.list_recent_active(limit=limit)
+        solved_ids = (
+            await self._challenge_repo.get_solved_challenge_ids(user.id) if user else set()
         )
-        result = await db.execute(query)
-        return [{"category": row.category, "count": row.count} for row in result.all()]
+        return [to_public(ch, is_solved=(ch.id in solved_ids)) for ch in challenges]
 
-    @staticmethod
+    async def get_category_summary(self) -> list[dict]:
+        rows = await self._challenge_repo.get_category_summary()
+        return [{"category": category, "count": count} for category, count in rows]
+
     async def get_challenge_by_id_or_slug(
-        db: AsyncSession,
+        self,
         challenge_id_or_slug: str,
         user: Optional[User] = None,
     ) -> ChallengePublic:
-        ch = await ChallengeService._get_active_challenge(db, challenge_id_or_slug)
-
-        is_solved = False
-        if user:
-            solve_res = await db.execute(
-                select(Solve).where(Solve.user_id == user.id, Solve.challenge_id == ch.id)
-            )
-            is_solved = solve_res.scalar_one_or_none() is not None
-
+        ch = await self._get_active_challenge(challenge_id_or_slug)
+        is_solved = (
+            await self._challenge_repo.has_user_solved(user.id, ch.id) if user else False
+        )
         return to_public(ch, is_solved=is_solved)
 
-    @staticmethod
     async def submit_flag(
-        db: AsyncSession,
+        self,
         challenge_id_or_slug: str,
         submitted_flag: str,
         user: User,
     ) -> FlagSubmissionResponse:
-        challenge = await ChallengeService._get_active_challenge(db, challenge_id_or_slug)
+        challenge = await self._get_active_challenge(challenge_id_or_slug)
 
-        solve_res = await db.execute(
-            select(Solve).where(Solve.user_id == user.id, Solve.challenge_id == challenge.id)
-        )
-        if solve_res.scalar_one_or_none():
+        if await self._challenge_repo.has_user_solved(user.id, challenge.id):
             return FlagSubmissionResponse(
                 is_correct=True,
                 message="You have already solved this challenge!",
@@ -161,20 +133,14 @@ class ChallengeService:
                 new_total_score=user.score,
             )
 
-        is_correct = verify_flag(submitted_flag, challenge.flag, challenge.flag_hash)
+        is_correct = self._flag_verifier.verify(submitted_flag, challenge.flag, challenge.flag_hash)
         now = datetime.now(timezone.utc)
-
-        submission = Submission(
-            user_id=user.id,
-            challenge_id=challenge.id,
-            submitted_flag=hash_flag(submitted_flag),
-            is_correct=is_correct,
-            submitted_at=now,
-        )
-        db.add(submission)
+        flag_digest = hash_flag(submitted_flag)
 
         if not is_correct:
-            await db.commit()
+            await self._challenge_repo.record_incorrect_submission(
+                user.id, challenge.id, flag_digest, now
+            )
             return FlagSubmissionResponse(
                 is_correct=False,
                 message="Incorrect flag. Keep analyzing!",
@@ -182,36 +148,29 @@ class ChallengeService:
                 new_total_score=user.score,
             )
 
-        solve = Solve(
-            user_id=user.id,
-            challenge_id=challenge.id,
-            points_awarded=challenge.points,
-            solved_at=now,
+        awarded, new_total_score = await self._challenge_repo.record_correct_solve(
+            user=user,
+            challenge=challenge,
+            flag_hash=flag_digest,
+            now=now,
         )
-        db.add(solve)
-
-        challenge.solves_count += 1
-        user.score += challenge.points
-        user.last_connected_at = now
-
-        await db.commit()
-        await db.refresh(user)
+        if not awarded:
+            return FlagSubmissionResponse(
+                is_correct=True,
+                message="You have already solved this challenge!",
+                points_awarded=0,
+                new_total_score=new_total_score,
+            )
 
         return FlagSubmissionResponse(
             is_correct=True,
             message=f"Congratulations! Flag accepted (+{challenge.points} pts)",
             points_awarded=challenge.points,
-            new_total_score=user.score,
+            new_total_score=new_total_score,
         )
 
-    @staticmethod
-    async def _get_active_challenge(db: AsyncSession, challenge_id_or_slug: str) -> Challenge:
-        query = select(Challenge).where(
-            (Challenge.id == challenge_id_or_slug) | (Challenge.slug == challenge_id_or_slug),
-            Challenge.is_active == True,
-        )
-        result = await db.execute(query)
-        ch = result.scalar_one_or_none()
+    async def _get_active_challenge(self, challenge_id_or_slug: str) -> Challenge:
+        ch = await self._challenge_repo.get_active_by_id_or_slug(challenge_id_or_slug)
         if not ch:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -242,78 +201,57 @@ class ChallengeService:
             ),
         )
 
-    @staticmethod
-    async def start_instance(db: AsyncSession, challenge_id_or_slug: str, user: User) -> ChallengeInstanceResponse:
-        ch = await ChallengeService._get_active_challenge(db, challenge_id_or_slug)
-
-        existing_q = select(ChallengeInstance).where(
-            ChallengeInstance.user_id == user.id,
-            ChallengeInstance.challenge_id == ch.id,
-            ChallengeInstance.status == STATUS_RUNNING,
-        )
-        existing = (await db.execute(existing_q)).scalar_one_or_none()
+    async def start_instance(
+        self,
+        challenge_id_or_slug: str,
+        user: User,
+    ) -> ChallengeInstanceResponse:
+        ch = await self._get_active_challenge(challenge_id_or_slug)
+        existing = await self._challenge_repo.get_running_instance(user.id, ch.id)
         if existing:
-            return ChallengeService._instance_response(existing, ch)
+            return self._instance_response(existing, ch)
 
-        now = datetime.now(timezone.utc)
-        instance = ChallengeInstance(
-            user_id=user.id,
-            challenge_id=ch.id,
-            status=STATUS_RUNNING,
-            created_at=now,
-            started_at=now,
+        instance = await self._challenge_repo.create_instance(
+            user.id, ch.id, datetime.now(timezone.utc)
         )
-        db.add(instance)
-        await db.commit()
-        await db.refresh(instance)
-        return ChallengeService._instance_response(instance, ch)
+        return self._instance_response(instance, ch)
 
-    @staticmethod
-    async def stop_instance(db: AsyncSession, challenge_id_or_slug: str, user: User) -> ChallengeInstanceResponse:
-        ch = await ChallengeService._get_active_challenge(db, challenge_id_or_slug)
-
-        instance_q = select(ChallengeInstance).where(
-            ChallengeInstance.user_id == user.id,
-            ChallengeInstance.challenge_id == ch.id,
-            ChallengeInstance.status == STATUS_RUNNING,
-        )
-        instance = (await db.execute(instance_q)).scalar_one_or_none()
+    async def stop_instance(
+        self,
+        challenge_id_or_slug: str,
+        user: User,
+    ) -> ChallengeInstanceResponse:
+        ch = await self._get_active_challenge(challenge_id_or_slug)
+        instance = await self._challenge_repo.get_running_instance(user.id, ch.id)
         if not instance:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="No running instance for this challenge.",
             )
 
-        instance.status = STATUS_STOPPED
-        instance.stopped_at = datetime.now(timezone.utc)
-        await db.commit()
-        await db.refresh(instance)
-        return ChallengeService._instance_response(instance, ch)
+        stopped = await self._challenge_repo.stop_instance(instance, datetime.now(timezone.utc))
+        return self._instance_response(stopped, ch)
 
-    @staticmethod
-    async def admin_get_all_challenges(db: AsyncSession) -> List[ChallengeAdmin]:
-        result = await db.execute(select(Challenge).order_by(Challenge.created_at.desc()))
-        return [to_admin(ch) for ch in result.scalars().all()]
+    async def admin_get_all_challenges(self) -> list[ChallengeAdmin]:
+        challenges = await self._challenge_repo.list_all()
+        return [to_admin(ch) for ch in challenges]
 
-    @staticmethod
-    async def admin_create_challenge(db: AsyncSession, req: ChallengeCreate) -> ChallengeAdmin:
-        result = await db.execute(select(Challenge).where(Challenge.slug == req.slug))
-        if result.scalar_one_or_none():
+    async def admin_create_challenge(self, req: ChallengeCreate) -> ChallengeAdmin:
+        if await self._challenge_repo.get_by_slug(req.slug):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Slug '{req.slug}' is already in use.",
             )
 
-        clean_flag = req.flag.strip()
         ch = Challenge(
             slug=req.slug,
             title=req.title,
             description=req.description,
             category=req.category,
-            difficulty=req.difficulty.upper(),
+            difficulty=req.difficulty,
             points=req.points,
             flag=REDACTED_FLAG_MARKER,
-            flag_hash=hash_flag(clean_flag),
+            flag_hash=hash_flag(req.flag),
             target_url=req.target_url,
             hints=req.hints,
             version=req.version,
@@ -323,19 +261,21 @@ class ChallengeService:
             solves_count=0,
             created_at=datetime.now(timezone.utc),
         )
-        db.add(ch)
-        await db.commit()
-        await db.refresh(ch)
-        return to_admin(ch)
+        try:
+            created = await self._challenge_repo.create(ch)
+        except IntegrityError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Slug '{req.slug}' is already in use.",
+            ) from exc
+        return to_admin(created)
 
-    @staticmethod
     async def admin_update_challenge(
-        db: AsyncSession,
+        self,
         challenge_id: str,
         req: ChallengeUpdate,
     ) -> ChallengeAdmin:
-        result = await db.execute(select(Challenge).where(Challenge.id == challenge_id))
-        ch = result.scalar_one_or_none()
+        ch = await self._challenge_repo.get_by_id(challenge_id)
         if not ch:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Challenge not found.")
 
@@ -346,35 +286,30 @@ class ChallengeService:
         if req.category is not None:
             ch.category = req.category
         if req.difficulty is not None:
-            ch.difficulty = req.difficulty.upper()
+            ch.difficulty = req.difficulty
         if req.points is not None:
             ch.points = req.points
-        if req.target_url is not None:
+        if "target_url" in req.model_fields_set:
             ch.target_url = req.target_url
-        if req.hints is not None:
+        if "hints" in req.model_fields_set:
             ch.hints = req.hints
         if req.version is not None:
             ch.version = req.version
-        if req.repository is not None:
+        if "repository" in req.model_fields_set:
             ch.repository = req.repository
-        if req.path is not None:
+        if "path" in req.model_fields_set:
             ch.path = req.path
         if req.flag is not None:
             ch.flag = REDACTED_FLAG_MARKER
-            ch.flag_hash = hash_flag(req.flag.strip())
+            ch.flag_hash = hash_flag(req.flag)
         if req.is_active is not None:
             ch.is_active = req.is_active
 
-        await db.commit()
-        await db.refresh(ch)
-        return to_admin(ch)
+        updated = await self._challenge_repo.save(ch)
+        return to_admin(updated)
 
-    @staticmethod
-    async def admin_delete_challenge(db: AsyncSession, challenge_id: str) -> None:
-        result = await db.execute(select(Challenge).where(Challenge.id == challenge_id))
-        ch = result.scalar_one_or_none()
+    async def admin_delete_challenge(self, challenge_id: str) -> None:
+        ch = await self._challenge_repo.get_by_id(challenge_id)
         if not ch:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Challenge not found.")
-
-        await db.delete(ch)
-        await db.commit()
+        await self._challenge_repo.delete(ch)

@@ -4,19 +4,99 @@ from typing import Optional
 
 from fastapi import Depends, HTTPException, Request, Response, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database import get_db
-from app.models.revoked_token import RevokedToken
 from app.models.user import User
-from app.services.security import decode_token_payload, generate_csrf_token
+from app.repositories import (
+    ChallengeRepositoryProtocol,
+    LeaderboardRepositoryProtocol,
+    SqlAlchemyChallengeRepository,
+    SqlAlchemyLeaderboardRepository,
+    SqlAlchemyTokenRevocationRepository,
+    SqlAlchemyUserRepository,
+    TokenRevocationRepositoryProtocol,
+    UserRepositoryProtocol,
+)
+from app.services.auth_service import AuthService
+from app.services.challenge_service import ChallengeService
+from app.services.ctf_academy_service import CtfAcademyService
+from app.services.leaderboard_service import LeaderboardService
+from app.services.security import (
+    FlagVerifier,
+    HmacFlagVerifier,
+    decode_token_payload,
+    generate_csrf_token,
+)
+from app.services.user_service import UserService
 
 http_bearer = HTTPBearer(auto_error=False)
 
 _UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 _LAST_CONNECTED_THROTTLE_SECONDS = 60
+
+
+def get_user_repository(db: AsyncSession = Depends(get_db)) -> UserRepositoryProtocol:
+    return SqlAlchemyUserRepository(db)
+
+
+def get_challenge_repository(db: AsyncSession = Depends(get_db)) -> ChallengeRepositoryProtocol:
+    return SqlAlchemyChallengeRepository(db)
+
+
+def get_leaderboard_repository(db: AsyncSession = Depends(get_db)) -> LeaderboardRepositoryProtocol:
+    return SqlAlchemyLeaderboardRepository(db)
+
+
+def get_token_repository(db: AsyncSession = Depends(get_db)) -> TokenRevocationRepositoryProtocol:
+    return SqlAlchemyTokenRevocationRepository(db)
+
+
+def get_flag_verifier() -> FlagVerifier:
+    return HmacFlagVerifier()
+
+
+def get_auth_service(
+    user_repo: UserRepositoryProtocol = Depends(get_user_repository),
+) -> AuthService:
+    return AuthService(user_repo=user_repo)
+
+
+def get_challenge_service(
+    challenge_repo: ChallengeRepositoryProtocol = Depends(get_challenge_repository),
+    flag_verifier: FlagVerifier = Depends(get_flag_verifier),
+) -> ChallengeService:
+    return ChallengeService(challenge_repo=challenge_repo, flag_verifier=flag_verifier)
+
+
+def get_leaderboard_service(
+    leaderboard_repo: LeaderboardRepositoryProtocol = Depends(get_leaderboard_repository),
+) -> LeaderboardService:
+    return LeaderboardService(leaderboard_repo=leaderboard_repo)
+
+
+def get_user_service(
+    user_repo: UserRepositoryProtocol = Depends(get_user_repository),
+    leaderboard_repo: LeaderboardRepositoryProtocol = Depends(get_leaderboard_repository),
+) -> UserService:
+    return UserService(user_repo=user_repo, leaderboard_repo=leaderboard_repo)
+
+
+def get_ctf_academy_service(
+    auth_service: AuthService = Depends(get_auth_service),
+    challenge_service: ChallengeService = Depends(get_challenge_service),
+    user_repo: UserRepositoryProtocol = Depends(get_user_repository),
+    challenge_repo: ChallengeRepositoryProtocol = Depends(get_challenge_repository),
+    leaderboard_repo: LeaderboardRepositoryProtocol = Depends(get_leaderboard_repository),
+) -> CtfAcademyService:
+    return CtfAcademyService(
+        auth_service=auth_service,
+        challenge_service=challenge_service,
+        user_repo=user_repo,
+        challenge_repo=challenge_repo,
+        leaderboard_repo=leaderboard_repo,
+    )
 
 
 def extract_token_from_request(
@@ -87,20 +167,25 @@ def clear_session_cookies(response: Response) -> None:
     response.delete_cookie(key=settings.CSRF_COOKIE_NAME, path="/", domain=settings.COOKIE_DOMAIN)
 
 
-async def is_token_revoked(db: AsyncSession, jti: Optional[str]) -> bool:
+async def is_token_revoked(
+    token_repo: TokenRevocationRepositoryProtocol,
+    jti: Optional[str],
+) -> bool:
     if not jti:
         return False
-    res = await db.execute(select(RevokedToken.jti).where(RevokedToken.jti == jti))
-    return res.scalar_one_or_none() is not None
+    return await token_repo.is_revoked(str(jti))
 
 
-async def revoke_token(db: AsyncSession, token: str) -> None:
+async def revoke_token(
+    token_repo: TokenRevocationRepositoryProtocol,
+    token: str,
+) -> None:
     payload = decode_token_payload(token)
     if not payload:
         return
 
     jti = payload.get("jti")
-    if not jti or await is_token_revoked(db, str(jti)):
+    if not jti:
         return
 
     exp_ts = payload.get("exp")
@@ -109,11 +194,13 @@ async def revoke_token(db: AsyncSession, token: str) -> None:
     else:
         expires_at = datetime.now(timezone.utc)
 
-    db.add(RevokedToken(jti=str(jti), expires_at=expires_at))
-    await db.commit()
+    await token_repo.revoke(str(jti), expires_at)
 
 
-async def touch_last_connected(db: AsyncSession, user: User) -> None:
+async def touch_last_connected(
+    user_repo: UserRepositoryProtocol,
+    user: User,
+) -> None:
     now = datetime.now(timezone.utc)
     last = user.last_connected_at
     if last is not None:
@@ -122,37 +209,38 @@ async def touch_last_connected(db: AsyncSession, user: User) -> None:
         if (now - last).total_seconds() < _LAST_CONNECTED_THROTTLE_SECONDS:
             return
 
-    user.last_connected_at = now
-    await db.commit()
+    await user_repo.touch_last_connected(user, now)
 
 
 async def get_current_user_optional(
     request: Request,
     auth: Optional[HTTPAuthorizationCredentials] = Depends(http_bearer),
-    db: AsyncSession = Depends(get_db),
+    user_repo: UserRepositoryProtocol = Depends(get_user_repository),
+    token_repo: TokenRevocationRepositoryProtocol = Depends(get_token_repository),
 ) -> Optional[User]:
     token, _ = extract_token_from_request(request, auth)
     if not token:
         return None
 
     payload = decode_token_payload(token)
-    if not payload or await is_token_revoked(db, payload.get("jti")):
+    if not payload or await is_token_revoked(token_repo, payload.get("jti")):
         return None
 
     user_id = payload.get("sub")
-    result = await db.execute(select(User).where(User.id == user_id, User.is_active == True))
-    user = result.scalar_one_or_none()
+    if not user_id:
+        return None
 
+    user = await user_repo.get_by_id(str(user_id), active_only=True)
     if user:
-        await touch_last_connected(db, user)
-
+        await touch_last_connected(user_repo, user)
     return user
 
 
 async def get_current_user(
     request: Request,
     auth: Optional[HTTPAuthorizationCredentials] = Depends(http_bearer),
-    db: AsyncSession = Depends(get_db),
+    user_repo: UserRepositoryProtocol = Depends(get_user_repository),
+    token_repo: TokenRevocationRepositoryProtocol = Depends(get_token_repository),
 ) -> User:
     token, is_cookie_auth = extract_token_from_request(request, auth)
     if not token:
@@ -163,7 +251,7 @@ async def get_current_user(
         )
 
     payload = decode_token_payload(token)
-    if not payload or await is_token_revoked(db, payload.get("jti")):
+    if not payload or await is_token_revoked(token_repo, payload.get("jti")):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid, expired, or revoked token.",
@@ -173,9 +261,7 @@ async def get_current_user(
     verify_csrf_if_cookie(request, is_cookie_auth)
 
     user_id = payload.get("sub")
-    result = await db.execute(select(User).where(User.id == user_id, User.is_active == True))
-    user = result.scalar_one_or_none()
-
+    user = await user_repo.get_by_id(str(user_id), active_only=True) if user_id else None
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -183,7 +269,7 @@ async def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    await touch_last_connected(db, user)
+    await touch_last_connected(user_repo, user)
     return user
 
 

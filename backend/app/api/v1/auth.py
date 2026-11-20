@@ -1,16 +1,18 @@
 from fastapi import APIRouter, Depends, Request, Response, status
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import (
     clear_session_cookies,
     extract_token_from_request,
+    get_auth_service,
     get_current_user,
+    get_token_repository,
+    get_user_service,
     revoke_token,
     set_session_cookies,
     verify_csrf_if_cookie,
 )
-from app.database import get_db
 from app.models.user import User
+from app.repositories.protocols import TokenRevocationRepositoryProtocol
 from app.schemas.auth import (
     LoginRequest,
     LogoutResponse,
@@ -32,10 +34,13 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
     status_code=status.HTTP_201_CREATED,
     dependencies=[Depends(rate_limit_auth)],
 )
-async def register(req: RegisterRequest, db: AsyncSession = Depends(get_db)):
+async def register(
+    req: RegisterRequest,
+    auth_service: AuthService = Depends(get_auth_service),
+):
     """Register a new player account."""
-    user = await AuthService.register_user(db, req)
-    return await AuthService.get_user_profile(db, user)
+    user = await auth_service.register_user(req)
+    return await auth_service.get_user_profile(user)
 
 
 @router.post(
@@ -43,9 +48,12 @@ async def register(req: RegisterRequest, db: AsyncSession = Depends(get_db)):
     response_model=TokenResponse,
     dependencies=[Depends(rate_limit_auth)],
 )
-async def login(req: LoginRequest, db: AsyncSession = Depends(get_db)):
+async def login(
+    req: LoginRequest,
+    auth_service: AuthService = Depends(get_auth_service),
+):
     """Authenticate and obtain a CLI/BFF Bearer token."""
-    return await AuthService.authenticate_user(db, req, token_type="cli")
+    return await auth_service.authenticate_user(req, token_type="cli")
 
 
 @router.post(
@@ -56,10 +64,10 @@ async def login(req: LoginRequest, db: AsyncSession = Depends(get_db)):
 async def session_login(
     req: LoginRequest,
     response: Response,
-    db: AsyncSession = Depends(get_db),
+    auth_service: AuthService = Depends(get_auth_service),
 ):
     """Authenticate web session using HttpOnly and CSRF cookies without exposing tokens in JSON."""
-    token_resp = await AuthService.authenticate_user(db, req, token_type="web")
+    token_resp = await auth_service.authenticate_user(req, token_type="web")
     set_session_cookies(response, token_resp.access_token)
     return SessionResponse(authenticated=True, user=token_resp.user)
 
@@ -69,14 +77,14 @@ async def session_login(
 async def session_logout(
     request: Request,
     response: Response,
-    db: AsyncSession = Depends(get_db),
+    token_repo: TokenRevocationRepositoryProtocol = Depends(get_token_repository),
 ):
     """Revoke active session token and clear browser cookies."""
     token, is_cookie_auth = extract_token_from_request(request)
     if is_cookie_auth:
         verify_csrf_if_cookie(request, True)
     if token:
-        await revoke_token(db, token)
+        await revoke_token(token_repo, token)
     clear_session_cookies(response)
     return LogoutResponse(authenticated=False, message="Session closed.")
 
@@ -84,17 +92,17 @@ async def session_logout(
 @router.get("/me", response_model=UserProfileDetail)
 async def get_current_user_profile(
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    user_service: UserService = Depends(get_user_service),
 ):
     """Retrieve the authenticated player profile and live statistics."""
-    return await UserService.get_user_profile_detail(db, current_user.username)
+    return await user_service.get_user_profile_detail(current_user.username)
 
 
 @router.put("/me", response_model=UserProfile)
 async def update_profile(
     req: UserUpdate,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    auth_service: AuthService = Depends(get_auth_service),
 ):
     """Update profile details such as nationality or password."""
-    return await AuthService.update_profile(db, current_user, req)
+    return await auth_service.update_profile(current_user, req)

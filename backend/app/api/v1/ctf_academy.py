@@ -2,13 +2,14 @@ from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field, ValidationError
-from sqlalchemy import desc, func, select
-from sqlalchemy.ext.asyncio import AsyncSession
+from pydantic import BaseModel, Field
 
 from app.api.deps import (
     clear_session_cookies,
     extract_token_from_request,
+    get_ctf_academy_service,
+    get_token_repository,
+    get_user_repository,
     is_token_revoked,
     revoke_token,
     set_session_cookies,
@@ -16,16 +17,11 @@ from app.api.deps import (
     verify_csrf_if_cookie,
 )
 from app.config import settings
-from app.database import get_db
-from app.models.challenge import Challenge
-from app.models.solve import Solve
 from app.models.user import User
-from app.schemas.auth import LoginRequest, RegisterRequest
-from app.services.auth_service import AuthService
-from app.services.challenge_service import ChallengeService
+from app.repositories.protocols import TokenRevocationRepositoryProtocol, UserRepositoryProtocol
+from app.services.ctf_academy_service import CtfAcademyService
 from app.services.rate_limiter import enforce_rate_limit, get_client_ip
-from app.services.security import create_access_token, decode_token_payload
-from app.services.user_service import UserService
+from app.services.security import decode_token_payload
 
 router = APIRouter(tags=["CTF Academy"])
 
@@ -53,133 +49,33 @@ def json_response(status_code: int, body: dict) -> JSONResponse:
     return JSONResponse(status_code=status_code, content=body)
 
 
-async def build_academy_state(db: AsyncSession, user: Optional[User]) -> dict:
-    """Build the CtfAcademyData envelope expected by the frontend."""
-    lb_result = await db.execute(
-        select(User.username, User.score, User.created_at)
-        .where(User.is_active.is_(True), User.role == "user")
-        .order_by(User.score.desc(), User.created_at.asc())
-        .limit(50)
-    )
-    leaderboard = [
-        {
-            "username": row.username,
-            "score": row.score,
-            "durationMs": 0,
-            "completedAt": int(row.created_at.timestamp() * 1000),
-        }
-        for row in lb_result.all()
-    ]
-
-    count_res = await db.execute(
-        select(func.count())
-        .select_from(User)
-        .where(User.is_active.is_(True), User.role == "user")
-    )
-    participants: int = count_res.scalar() or 0
-
-    current_user_data = None
-    session_data = None
-
-    if user:
-        solves_res = await db.execute(
-            select(Solve.challenge_id, Solve.solved_at)
-            .where(Solve.user_id == user.id)
-            .order_by(Solve.solved_at.asc())
-        )
-        solves = solves_res.all()
-        completed_ids = [str(s.challenge_id) for s in solves]
-        completion_times = {str(s.challenge_id): int(s.solved_at.timestamp() * 1000) for s in solves}
-
-        total_res = await db.execute(
-            select(func.count()).select_from(Challenge).where(Challenge.is_active.is_(True))
-        )
-        total_challenges: int = total_res.scalar() or 0
-        completed_at_ts = None
-        if total_challenges > 0 and len(completed_ids) >= total_challenges and solves:
-            completed_at_ts = int(solves[-1].solved_at.timestamp() * 1000)
-
-        global_rank: Any = "Sin clasificar"
-        if user.role == "user" and user.score > 0 and len(completed_ids) > 0:
-            active_solvers_subquery = select(Solve.user_id).group_by(Solve.user_id).subquery()
-            rank_query = (
-                select(User.id)
-                .join(active_solvers_subquery, User.id == active_solvers_subquery.c.user_id)
-                .where(User.is_active.is_(True), User.role == "user", User.score > 0)
-                .order_by(desc(User.score), User.created_at.asc())
-            )
-            rank_res = await db.execute(rank_query)
-            ranked_user_ids = [row[0] for row in rank_res.all()]
-            if user.id in ranked_user_ids:
-                global_rank = ranked_user_ids.index(user.id) + 1
-
-        rank_name = UserService.get_rank_name(user.score)
-        created_ms = int(user.created_at.timestamp() * 1000)
-
-        current_user_data = {
-            "id": user.id,
-            "username": user.username,
-            "email": user.email,
-            "role": user.role,
-            "nationality": user.nationality,
-            "score": user.score,
-            "rankName": rank_name,
-            "rank_name": rank_name,
-            "globalRank": global_rank,
-            "global_rank": global_rank,
-            "createdAt": created_ms,
-            "created_at": created_ms,
-            "startedAt": created_ms,
-            "completedChallengeIds": completed_ids,
-            "completionTimes": completion_times,
-            "solvesCount": len(completed_ids),
-            "solves_count": len(completed_ids),
-            **({"completedAt": completed_at_ts} if completed_at_ts else {}),
-        }
-        session_data = {
-            "id": user.id,
-            "username": user.username,
-            "email": user.email,
-            "role": user.role,
-            "nationality": user.nationality,
-            "score": user.score,
-            "isLoggedIn": True,
-            "is_logged_in": True,
-            "user": current_user_data,
-        }
-
-    return {
-        "session": session_data,
-        "currentUser": current_user_data,
-        "leaderboard": leaderboard,
-        "participants": participants,
-    }
-
-
 async def get_authenticated_academy_user(
     request: Request,
-    db: AsyncSession,
+    user_repo: UserRepositoryProtocol,
+    token_repo: TokenRevocationRepositoryProtocol,
     require_csrf: bool = False,
 ) -> tuple[Optional[User], Optional[str], Optional[JSONResponse]]:
     token, is_cookie_auth = extract_token_from_request(request)
     if not token:
         return None, None, None
 
+    payload = decode_token_payload(token)
+    if not payload or await is_token_revoked(token_repo, payload.get("jti")):
+        return None, token, None
+
     if require_csrf and is_cookie_auth:
         try:
             verify_csrf_if_cookie(request, True)
         except HTTPException:
-            return None, token, json_response(status.HTTP_403_FORBIDDEN, err_resp("Validacion CSRF fallida."))
-
-    payload = decode_token_payload(token)
-    if not payload or await is_token_revoked(db, payload.get("jti")):
-        return None, token, None
+            return None, token, json_response(
+                status.HTTP_403_FORBIDDEN,
+                err_resp("Validacion CSRF fallida."),
+            )
 
     user_id = payload.get("sub")
-    result = await db.execute(select(User).where(User.id == user_id, User.is_active.is_(True)))
-    user = result.scalar_one_or_none()
+    user = await user_repo.get_by_id(str(user_id), active_only=True) if user_id else None
     if user:
-        await touch_last_connected(db, user)
+        await touch_last_connected(user_repo, user)
     return user, token, None
 
 
@@ -187,7 +83,9 @@ async def get_authenticated_academy_user(
 async def ctf_academy_handler(
     body: CtfAcademyRequest,
     request: Request,
-    db: AsyncSession = Depends(get_db),
+    academy_service: CtfAcademyService = Depends(get_ctf_academy_service),
+    user_repo: UserRepositoryProtocol = Depends(get_user_repository),
+    token_repo: TokenRevocationRepositoryProtocol = Depends(get_token_repository),
 ) -> JSONResponse:
     action = body.action.strip().lower()
     client_ip = get_client_ip(request)
@@ -199,32 +97,15 @@ async def ctf_academy_handler(
             settings.RATE_LIMIT_AUTH_MAX,
             settings.RATE_LIMIT_AUTH_WINDOW_SECONDS,
         )
-        username = (body.username or "").strip()
-        password = body.password or ""
-
-        if len(username) < 3:
-            return json_response(400, err_resp("El usuario debe tener al menos 3 caracteres."))
-        if len(password) < 6:
-            return json_response(400, err_resp("La contrasena debe tener al menos 6 caracteres."))
-
         try:
-            req = RegisterRequest(
-                username=username,
-                email=f"{username}@ctf.eclipsec.cl",
-                password=password,
-                nationality="CL",
+            user, new_token = await academy_service.register_academy_user(
+                username=body.username or "",
+                password=body.password or "",
             )
-            user = await AuthService.register_user(db, req)
-        except ValidationError:
-            return json_response(400, err_resp("Formato de usuario o contrasena invalido."))
         except HTTPException as exc:
-            detail = str(exc.detail).lower()
-            if any(k in detail for k in ("already", "exist", "registered")):
-                return json_response(409, err_resp("Ese usuario ya existe."))
-            return json_response(exc.status_code, err_resp("No se pudo registrar el usuario."))
+            return json_response(exc.status_code, err_resp(str(exc.detail)))
 
-        new_token = create_access_token(subject=user.id, token_type="web")
-        data = await build_academy_state(db, user)
+        data = await academy_service.build_state(user)
         resp = json_response(200, ok_resp("Usuario creado. Bienvenido a la Academia.", data=data))
         set_session_cookies(resp, new_token)
         return resp
@@ -236,30 +117,17 @@ async def ctf_academy_handler(
             settings.RATE_LIMIT_AUTH_MAX,
             settings.RATE_LIMIT_AUTH_WINDOW_SECONDS,
         )
-        username = (body.username or "").strip()
-        password = body.password or ""
-
-        if not username or not password:
-            return json_response(400, err_resp("Usuario y contrasena son requeridos."))
-
         try:
-            token_resp = await AuthService.authenticate_user(
-                db,
-                LoginRequest(username_or_email=username, password=password),
-                token_type="web",
+            user, token = await academy_service.login_academy_user(
+                username=body.username or "",
+                password=body.password or "",
             )
         except HTTPException as exc:
-            if exc.status_code == status.HTTP_403_FORBIDDEN:
-                return json_response(403, err_resp("Tu cuenta esta suspendida."))
-            return json_response(401, err_resp("Usuario o contrasena incorrectos."))
+            return json_response(exc.status_code, err_resp(str(exc.detail)))
 
-        payload = decode_token_payload(token_resp.access_token)
-        user_id = payload.get("sub") if payload else None
-        result = await db.execute(select(User).where(User.id == user_id))
-        user = result.scalar_one_or_none()
-        data = await build_academy_state(db, user)
+        data = await academy_service.build_state(user)
         resp = json_response(200, ok_resp("Sesion iniciada.", data=data))
-        set_session_cookies(resp, token_resp.access_token)
+        set_session_cookies(resp, token)
         return resp
 
     if action == "logout":
@@ -270,14 +138,16 @@ async def ctf_academy_handler(
             except HTTPException:
                 return json_response(status.HTTP_403_FORBIDDEN, err_resp("Validacion CSRF fallida."))
         if token:
-            await revoke_token(db, token)
+            await revoke_token(token_repo, token)
         resp = json_response(200, ok_resp("Sesion cerrada."))
         clear_session_cookies(resp)
         return resp
 
     if action == "state":
-        user, _, _ = await get_authenticated_academy_user(request, db, require_csrf=False)
-        data = await build_academy_state(db, user)
+        user, _, _ = await get_authenticated_academy_user(
+            request, user_repo, token_repo, require_csrf=False
+        )
+        data = await academy_service.build_state(user)
         return json_response(200, ok_resp("Estado cargado.", data=data))
 
     if action == "complete":
@@ -287,7 +157,9 @@ async def ctf_academy_handler(
             settings.RATE_LIMIT_FLAG_MAX,
             settings.RATE_LIMIT_FLAG_WINDOW_SECONDS,
         )
-        user, token, err_response = await get_authenticated_academy_user(request, db, require_csrf=True)
+        user, token, err_response = await get_authenticated_academy_user(
+            request, user_repo, token_repo, require_csrf=True
+        )
         if err_response is not None:
             return err_response
         if not token:
@@ -302,11 +174,10 @@ async def ctf_academy_handler(
             return json_response(400, err_resp("challengeId y flag son requeridos."))
 
         try:
-            result = await ChallengeService.submit_flag(
-                db=db,
-                challenge_id_or_slug=challenge_id,
-                submitted_flag=submitted_flag,
+            result = await academy_service.complete_challenge(
                 user=user,
+                challenge_id=challenge_id,
+                submitted_flag=submitted_flag,
             )
         except HTTPException as exc:
             if exc.status_code == status.HTTP_404_NOT_FOUND:
@@ -316,7 +187,7 @@ async def ctf_academy_handler(
         if not result.is_correct:
             return json_response(401, err_resp("Flag incorrecta."))
 
-        data = await build_academy_state(db, user)
+        data = await academy_service.build_state(user)
         return json_response(200, ok_resp(result.message, data=data))
 
     return json_response(400, err_resp("Accion desconocida."))
