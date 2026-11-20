@@ -1,157 +1,100 @@
 # EclipSec CTF - Backend API Service
 
-Backend de alto rendimiento construido con **FastAPI**, **SQLAlchemy (Async)** y **PostgreSQL / SQLite**, diseñado para ser desplegado en **Railway** y consumido por el frontend en **Vercel** (`eclipsec.cl`).
+Servicio backend asincrono construido con **FastAPI**, **SQLAlchemy (Async)** y **PostgreSQL / SQLite**, disenado para ejecutarse en **Railway** e integrarse de forma segura con el portal web **EclipSec** (`eclipsec.cl`) y el cliente **eclipsecCLI**.
 
 ---
 
-## 🚀 Características Principales
+## Capacidades Principales
 
-1. **Gestión de Usuarios & Telemetría**:
-   - Registro e inicio de sesión seguro con JWT (Argon2 / Bcrypt).
-   - **Nacionalidad** (`nationality`): Código de país (ej. `CL`, `AR`, `PE`, `MX`, `ES`) con banderas en el ranking.
-   - **Puntaje** (`score`): Suma acumulada de puntos de retos resueltos.
-   - **Fecha de Inicio** (`created_at`): Registro de cuándo el jugador se unió a la plataforma.
-   - **Último Momento Conectado** (`last_connected_at`): Actualización automática en cada solicitud autenticada.
+1. **Autenticacion y Telemetria**:
+   - Registro y autenticacion con hashing de contraseñas via `bcrypt` y emision de JWT (`HS256`).
+   - Registro de `nationality`, puntaje acumulado (`score`), fecha de ingreso (`created_at`) y ultima conexion (`last_connected_at`).
+2. **Gestion de Retos, Instancias CLI y Validacion de Flags**:
+   - Catalogo filtrable por categoria y dificultad con resolucion dinamica de `target_url` via `CHALLENGES_BASE_URL`.
+   - Verificacion de flags en tiempo constante mediante `hmac.compare_digest` y prevencion de doble puntuacion (`uq_user_challenge_solve`).
+   - Registro idempotente de sesiones locales (`/start`, `/stop`) con metadatos de repositorio (`repository`, `path`, `version`) para `eclipsecCLI`.
+3. **Leaderboard y Perfiles**:
+   - Ranking global ordenado por `score DESC`, desempate por `last_solve_at ASC NULLS LAST` y `created_at ASC`.
+   - Estadisticas agregadas por nacionalidad (`/api/v1/leaderboard/countries`) y perfiles de jugador (`/api/v1/users/{username}/profile`).
+4. **Administracion RBAC y Adaptador Legacy**:
+   - CRUD completo de retos y administracion de usuarios bajo rol `admin` (`/api/v1/admin/*`).
+   - Adaptador de compatibilidad en `POST /api/ctf-academy`.
 
-2. **Mecanismo de Retos & Flags**:
-   - Listado público con indicador de resolución dinámica (`is_solved: true/false`).
-   - Verificación de flags en **tiempo constante** (`hmac.compare_digest`) para mitigar ataques de temporización (timing attacks).
-   - Prevención estricta de resoluciones duplicadas (no otorga puntos repetidos).
-   - Registro histórico de envíos (`submissions`) y resoluciones (`solves`).
-
-3. **Leaderboard en Tiempo Real**:
-   - Ranking global ordenado por:
-     1. Mayor puntaje (`score DESC`).
-     2. Menor tiempo de resolución en el último reto resuelto (criterio de desempate).
-     3. Fecha de inicio (`created_at ASC`).
-   - Métricas agregadas por país (`/api/v1/leaderboard/countries`).
-
-4. **Panel de Administración (RBAC)**:
-   - Endpoints protegidos con rol `admin`.
-   - Creación, actualización y eliminación de retos con asignación de dificultad (`EASY`, `MEDIUM`, `HARD`, `INSANE`), puntajes y flags.
-   - Gestión de usuarios (cambio de roles, ajuste de puntuaciones, activación/suspensión).
-
-5. **Integración con Vercel**:
-   - Soporte nativo de CORS para `https://eclipsec.cl` y cualquier subdominio preview `https://*.vercel.app`.
-   - Documentación Swagger interactiva lista en `/docs`.
+Para revisar la referencia completa de contratos, payloads y las mejoras de seguridad planificadas, consulta [Referencia de la API](../docs/API_REFERENCE.md) y la [Auditoria Tecnica](../docs/PROJECT_AUDIT.md).
 
 ---
 
-## 📡 Referencia de la API
+## Resumen de Endpoints
 
-### Autenticación (`/api/v1/auth`)
-| Método | Endpoint | Descripción | Auth Requerida |
-|---|---|---|---|
-| `POST` | `/api/v1/auth/register` | Registrar nuevo jugador (`username`, `email`, `password`, `nationality`) | No |
-| `POST` | `/api/v1/auth/login` | Iniciar sesión y obtener token JWT Bearer | No |
-| `GET` | `/api/v1/auth/me` | Obtener perfil del usuario actual, estadísticas y solves | Sí (Bearer) |
-| `PUT` | `/api/v1/auth/me` | Actualizar nacionalidad o contraseña | Sí (Bearer) |
-
-### Retos (`/api/v1/challenges`)
-| Método | Endpoint | Descripción | Auth Requerida |
-|---|---|---|---|
-| `GET` | `/api/v1/challenges` | Listar todos los retos activos (indica `is_solved` si se envía token) | Opcional |
-| `GET` | `/api/v1/challenges/{id_or_slug}` | Obtener detalle de un reto específico | Opcional |
-| `POST` | `/api/v1/challenges/{id_or_slug}/submit` | Enviar una flag para validación y suma de puntos | Sí (Bearer) |
-
-### Ranking & Leaderboard (`/api/v1/leaderboard`)
-| Método | Endpoint | Descripción | Auth Requerida |
-|---|---|---|---|
-| `GET` | `/api/v1/leaderboard` | Tabla de clasificación general con ranks, puntajes, fechas y países | No |
-| `GET` | `/api/v1/leaderboard/countries` | Estadísticas agrupadas por nacionalidad | No |
-
-### Panel de Administración (`/api/v1/admin`)
-| Método | Endpoint | Descripción | Auth Requerida |
-|---|---|---|---|
-| `GET` | `/api/v1/admin/challenges` | Listar todos los retos con flags y soluciones | Admin |
-| `POST` | `/api/v1/admin/challenges` | Crear nuevo reto (`title`, `slug`, `points`, `difficulty`, `flag`) | Admin |
-| `PUT` | `/api/v1/admin/challenges/{id}` | Editar reto, dificultad, puntos o flag | Admin |
-| `DELETE` | `/api/v1/admin/challenges/{id}` | Eliminar reto | Admin |
-| `GET` | `/api/v1/admin/users` | Listar todos los usuarios, roles y telemetría | Admin |
-| `PUT` | `/api/v1/admin/users/{id}` | Modificar rol (`user`/`admin`), estado o puntaje | Admin |
+| Grupo | Prefijo | Endpoints Principales |
+|---|---|---|
+| Salud | `/` | `GET /`, `GET /health` |
+| Autenticacion | `/api/v1/auth` | `POST /register`, `POST /login`, `GET /me`, `PUT /me` |
+| Retos e Instancias | `/api/v1/challenges` | `GET /`, `GET /recent`, `GET /categories`, `GET /{id_or_slug}`, `POST /{id_or_slug}/submit`, `POST /{id_or_slug}/start`, `POST /{id_or_slug}/stop` |
+| Leaderboard | `/api/v1/leaderboard` | `GET /`, `GET /countries` |
+| Usuarios | `/api/v1/users` | `GET /{username}/profile` |
+| Administracion | `/api/v1/admin` | `GET/POST /challenges`, `PUT/DELETE /challenges/{id}`, `GET /users`, `PUT /users/{id}` |
+| Adaptador Legacy | `/api/ctf-academy` | `POST /api/ctf-academy` |
 
 ---
 
-## 🛠️ Ejecución Local
+## Ejecucion Local
 
-### 1. Requisitos
+### Requisitos
 - Python 3.11+
-- Virtualenv
+- `pip` y `venv`
 
-### 2. Instalación
+### Configuracion en Windows (PowerShell)
+
+```powershell
+cd backend
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+Copy-Item .env.example .env
+python seed.py
+uvicorn app.main:app --reload --port 8000
+```
+
+### Configuracion en Linux / macOS
+
 ```bash
-# Crear entorno virtual e instalar dependencias
+cd backend
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-
-# Poblar base de datos inicial con 11 retos y usuarios demo
+cp .env.example .env
 python seed.py
-
-# Iniciar servidor de desarrollo
 uvicorn app.main:app --reload --port 8000
 ```
-Visita `http://localhost:8000/docs` para ver la interfaz Swagger.
+
+Documentacion interactiva disponible en `http://localhost:8000/docs`.
 
 ---
 
-## 🚢 Despliegue en Railway
+## Pruebas Automatizadas
 
-1. **Crear Proyecto en Railway**:
-   - Conecta el repositorio de GitHub.
-   - Agrega un plugin de **PostgreSQL** al proyecto en Railway.
-2. **Configurar el Servicio Backend**:
-   - **Root Directory**: `backend` (o raíz con el `Dockerfile` apuntando a `backend/Dockerfile`).
-   - Railway inyectará automáticamente `DATABASE_URL` y `PORT`.
-3. **Variables de Entorno (Environment Variables)**:
-   ```env
-   ENVIRONMENT=production
-   JWT_SECRET=tu-clave-secreta-super-larga-y-aleatoria
-   CORS_ORIGINS=https://eclipsec.cl,https://www.eclipsec.cl,http://localhost:3000
-   ADMIN_USERNAME=admin
-   ADMIN_EMAIL=admin@eclipsec.cl
-   ADMIN_PASSWORD=ContraseñaSuperSeguraAdmin2026!
-   ```
+Las suites de prueba estan ubicadas en `backend/tests/` (`test_auth.py`, `test_challenges.py`, `test_instances.py`, `test_leaderboard.py`, `test_users.py`, `test_admin.py`) y utilizan SQLite en memoria (`sqlite+aiosqlite:///:memory:`).
 
----
-
-## 💻 Conexión desde el Frontend en Vercel (TypeScript / Next.js)
-
-Ejemplo de cliente API para tu proyecto `eclipsec`:
-
-```typescript
-// lib/api.ts
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://tu-backend.up.railway.app';
-
-export async function fetchWithAuth(endpoint: string, options: RequestInit = {}) {
-  const token = localStorage.getItem('token');
-  const headers: HeadersInit = {
-    'Content-Type': 'application/json',
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    ...options.headers,
-  };
-
-  const response = await fetch(`${API_URL}${endpoint}`, { ...options, headers });
-  if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.detail || 'Error en la petición');
-  }
-  return response.json();
-}
-
-// 1. Obtener Lista de Retos
-export const getChallenges = () => fetchWithAuth('/api/v1/challenges');
-
-// 2. Enviar Flag
-export const submitFlag = (challengeSlug: string, flag: string) =>
-  fetchWithAuth(`/api/v1/challenges/${challengeSlug}/submit`, {
-    method: 'POST',
-    body: JSON.stringify({ flag }),
-  });
-
-// 3. Obtener Leaderboard
-export const getLeaderboard = () => fetchWithAuth('/api/v1/leaderboard');
-
-// 4. Obtener Métricas por País
-export const getCountryStats = () => fetchWithAuth('/api/v1/leaderboard/countries');
+```powershell
+cd backend
+pytest -v
 ```
+
+---
+
+## Variables de Entorno Clave
+
+Ademas de las definidas en `.env.example`, la configuracion en `app/config.py` soporta:
+
+```env
+ENVIRONMENT=production
+DATABASE_URL=postgresql+asyncpg://user:password@host:5432/dbname
+JWT_SECRET=<cadena-aleatoria-segura-minimo-32-caracteres>
+CORS_ORIGINS=https://eclipsec.cl,https://www.eclipsec.cl
+CORS_ORIGIN_REGEX=
+CHALLENGES_BASE_URL=https://retos.eclipsec.cl
+CHALLENGES_REPOSITORY=ElRetrillo/retos_ctf
+```
+
+Nota de seguridad: Nunca reutilizar `JWT_SECRET` ni credenciales de ejemplo de desarrollo en despliegues publicos. Consulta [Estandares DevSecOps](../docs/STANDARDS.md) para el patron de integracion BFF sin exposicion de tokens en navegador.
