@@ -1,5 +1,12 @@
 import asyncio
+import sys
 from datetime import datetime, timezone
+from pathlib import Path
+
+BACKEND_DIR = Path(__file__).resolve().parent
+if str(BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(BACKEND_DIR))
+
 from sqlalchemy import select
 from app.database import engine, AsyncSessionLocal, init_db
 from app.models.user import User

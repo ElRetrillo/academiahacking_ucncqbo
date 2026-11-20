@@ -21,7 +21,10 @@ async def lifespan(app: FastAPI):
             has_challenges = result.first() is not None
         
         if not has_challenges:
-            from seed import seed
+            try:
+                from seed import seed
+            except ImportError:
+                from backend.seed import seed
             print("No challenges found in the database. Running automatic seeding...")
             await seed()
             print("Automatic seeding completed successfully.")
