@@ -1,11 +1,12 @@
-import os
+from pathlib import Path
 
-challenges = [
+BASE_DIR = Path(__file__).resolve().parent
+
+CHALLENGES = [
     {
         "id": "002",
         "name": "Robots & Crawlers",
         "type": "EASY - WEB",
-        "desc": "Check the robots.txt file.",
         "port_web": 8002,
         "port_ttyd": 7682,
         "script": """
@@ -27,13 +28,12 @@ def flag():
 
 if __name__ == '__main__':
     app.run(host='127.0.0.1', port=8000)
-"""
+""",
     },
     {
         "id": "003",
         "name": "Cookie Tampering",
         "type": "EASY - WEB",
-        "desc": "Manipulate your cookie to become admin.",
         "port_web": 8003,
         "port_ttyd": 7683,
         "script": """
@@ -52,15 +52,18 @@ def index():
 
 if __name__ == '__main__':
     app.run(host='127.0.0.1', port=8000)
-"""
+""",
     },
     {
         "id": "004",
         "name": "Ping of Death",
         "type": "MEDIUM - WEB",
-        "desc": "Command Injection in a ping tool.",
         "port_web": 8004,
         "port_ttyd": 7684,
+        "build_steps": (
+            "RUN echo 'EclipSec{p1ng_0f_d34th_cmdi}' > /flag.txt && \\\n"
+            "    cp /flag.txt /app/flag.txt"
+        ),
         "script": """
 import os
 from flask import Flask, request, render_template_string
@@ -88,16 +91,20 @@ def index():
     return render_template_string(template, output=output)
 
 if __name__ == '__main__':
+    with open('/flag.txt', 'w') as f: f.write('EclipSec{p1ng_0f_d34th_cmdi}')
     app.run(host='127.0.0.1', port=8000)
-"""
+""",
     },
     {
         "id": "005",
         "name": "LFI to RCE",
         "type": "MEDIUM - WEB",
-        "desc": "Local File Inclusion.",
         "port_web": 8005,
         "port_ttyd": 7685,
+        "build_steps": (
+            "RUN echo 'Welcome to the home page.' > /app/home.txt && \\\n"
+            "    echo 'EclipSec{l0c4l_f1l3_1nclus10n_m4st3r}' > /flag.txt"
+        ),
         "script": """
 import os
 from flask import Flask, request
@@ -114,16 +121,13 @@ def index():
     return f'<html><body style="background:#1a1a2e;color:#e94560;font-family:sans-serif;text-align:center;padding:50px;"><h1>LFI Challenge</h1><p><a href="?file=home.txt" style="color:white;">Home</a></p><pre style="text-align:left; background:#0f3460; padding:20px; color:white;">{content}</pre></body></html>'
 
 if __name__ == '__main__':
-    with open('home.txt', 'w') as f: f.write('Welcome to the home page.')
-    with open('/flag.txt', 'w') as f: f.write('EclipSec{l0c4l_f1l3_1nclus10n_m4st3r}')
     app.run(host='127.0.0.1', port=8000)
-"""
+""",
     },
     {
         "id": "006",
         "name": "SQLi Login Bypass",
         "type": "MEDIUM - WEB",
-        "desc": "Bypass the login with SQL Injection.",
         "port_web": 8006,
         "port_ttyd": 7686,
         "script": """
@@ -174,13 +178,12 @@ def index():
 if __name__ == '__main__':
     init_db()
     app.run(host='127.0.0.1', port=8000)
-"""
+""",
     },
     {
         "id": "007",
         "name": "IDOR Profiles",
         "type": "MEDIUM - WEB",
-        "desc": "Insecure Direct Object Reference.",
         "port_web": 8007,
         "port_ttyd": 7687,
         "script": """
@@ -201,15 +204,15 @@ def index():
 
 if __name__ == '__main__':
     app.run(host='127.0.0.1', port=8000)
-"""
+""",
     },
     {
         "id": "008",
         "name": "Server-Side Template Injection",
         "type": "HARD - WEB",
-        "desc": "SSTI vulnerability.",
         "port_web": 8008,
         "port_ttyd": 7688,
+        "env_block": "ENV FLAG='EclipSec{sst1_t3mpl4t3_1nj3ct10n}'\n\n",
         "script": """
 from flask import Flask, request, render_template_string
 app = Flask(__name__)
@@ -225,13 +228,12 @@ if __name__ == '__main__':
     import os
     os.environ['FLAG'] = 'EclipSec{sst1_t3mpl4t3_1nj3ct10n}'
     app.run(host='127.0.0.1', port=8000)
-"""
+""",
     },
     {
         "id": "009",
         "name": "Source Code Leak",
         "type": "EASY - WEB",
-        "desc": "Check for backup files.",
         "port_web": 8009,
         "port_ttyd": 7689,
         "script": """
@@ -247,7 +249,7 @@ def index():
     </body></html>
     '''
 
-@app.route('/index.py.bak')
+@app.route('/index.bak')
 def bak():
     return '''
 # Backup file
@@ -258,13 +260,12 @@ def login():
 
 if __name__ == '__main__':
     app.run(host='127.0.0.1', port=8000)
-"""
+""",
     },
     {
         "id": "010",
         "name": "Headers Matter",
         "type": "MEDIUM - WEB",
-        "desc": "Spoof your headers.",
         "port_web": 8010,
         "port_ttyd": 7690,
         "script": """
@@ -286,15 +287,18 @@ def index():
 
 if __name__ == '__main__':
     app.run(host='127.0.0.1', port=8000)
-"""
+""",
     },
     {
         "id": "011",
         "name": "Command Execution GET",
         "type": "HARD - WEB",
-        "desc": "Execute commands via GET parameter.",
         "port_web": 8011,
         "port_ttyd": 7691,
+        "build_steps": (
+            "RUN echo 'EclipSec{c0mm4nd_3x3cut10n_v1a_g3t}' > /flag.txt && \\\n"
+            "    cp /flag.txt /app/flag.txt"
+        ),
         "script": """
 import os
 from flask import Flask, request
@@ -312,20 +316,14 @@ def index():
 if __name__ == '__main__':
     with open('/flag.txt', 'w') as f: f.write('EclipSec{c0mm4nd_3x3cut10n_v1a_g3t}')
     app.run(host='127.0.0.1', port=8000)
-"""
-    }
+""",
+    },
 ]
 
-dockerfile_template = '''\\
-# ================================================================
-# Reto CTF de EclipSec
-# ================================================================
-
-FROM ubuntu:22.04
+DOCKERFILE_TEMPLATE = """FROM ubuntu:22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Instalar dependencias
 RUN apt-get update && apt-get install -y --no-install-recommends \\
     nginx \\
     curl \\
@@ -341,7 +339,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \\
 
 RUN pip3 install flask
 
-# Instalar ttyd
 RUN ARCH=$(uname -m) && \\
     if [ "$ARCH" = "x86_64" ]; then TTYD_ARCH="x86_64"; \\
     elif [ "$ARCH" = "aarch64" ]; then TTYD_ARCH="aarch64"; \\
@@ -350,11 +347,9 @@ RUN ARCH=$(uname -m) && \\
         -o /usr/local/bin/ttyd && \\
     chmod +x /usr/local/bin/ttyd
 
-# Script del reto
-RUN mkdir -p /app
+__ENV_BLOCK__RUN mkdir -p /app
 COPY app.py /app/app.py
-
-# Nginx
+__BUILD_STEPS_BLOCK__
 RUN cat > /start.sh << 'STARTSCRIPT'
 #!/bin/bash
 set -e
@@ -367,16 +362,16 @@ server {
 
     location / {
         proxy_pass http://127.0.0.1:8000/;
-        proxy_set_header Host \\$host;
-        proxy_set_header X-Real-IP \\$remote_addr;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
     }
 
     location /ws/ {
         proxy_pass http://127.0.0.1:7681/;
         proxy_http_version 1.1;
-        proxy_set_header Upgrade \\$http_upgrade;
+        proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
-        proxy_set_header Host \\$host;
+        proxy_set_header Host $host;
     }
 }
 NGINXCONF
@@ -400,49 +395,57 @@ RUN chmod +x /start.sh
 EXPOSE 80 7681
 
 CMD ["/start.sh"]
-'''
-
-base_dir = "/home/daniel/academiahacking_ucncqbo/docker"
-compose_additions = ""
-
-for c in challenges:
-    ch_dir = os.path.join(base_dir, f"challenge-web-{c['id']}")
-    os.makedirs(ch_dir, exist_ok=True)
-    
-    with open(os.path.join(ch_dir, "app.py"), "w") as f:
-        f.write(c["script"].strip())
-    
-    with open(os.path.join(ch_dir, "Dockerfile"), "w") as f:
-        f.write(dockerfile_template)
-        
-    compose_additions += f"""
-  # ──────────────────────────────────────────────────────────────
-  # web-{c['id']}: {c['name']} ({c['type']})
-  # ──────────────────────────────────────────────────────────────
-  web-{c['id']}:
-    build: ./challenge-web-{c['id']}
-    container_name: ctf-web-{c['id']}
-    restart: unless-stopped
-    ports:
-      - "{c['port_web']}:80"
-      - "{c['port_ttyd']}:7681"
-    networks:
-      - ctf-net
 """
 
-# Append to docker-compose.yml
-compose_path = os.path.join(base_dir, "docker-compose.yml")
-with open(compose_path, "r") as f:
-    original_compose = f.read()
 
-# Insert before `networks:`
-if "networks:" in original_compose:
-    parts = original_compose.split("networks:", 1)
-    new_compose = parts[0] + compose_additions + "\\nnetworks:" + parts[1]
-    with open(compose_path, "w") as f:
-        f.write(new_compose)
-else:
-    with open(compose_path, "a") as f:
-        f.write(compose_additions)
+def render_dockerfile(challenge: dict) -> str:
+    """Render a standalone challenge Dockerfile without escaping errors."""
+    env_block = challenge.get("env_block", "")
+    build_steps = challenge.get("build_steps", "")
+    build_steps_block = f"\n{build_steps}\n" if build_steps else ""
+    return (
+        DOCKERFILE_TEMPLATE
+        .replace("__ENV_BLOCK__", env_block)
+        .replace("__BUILD_STEPS_BLOCK__", build_steps_block)
+    )
 
-print("Created 10 new challenges and updated docker-compose.yml successfully.")
+
+def render_service_entry(challenge_id: str, port_web: int, port_ttyd: int) -> str:
+    """Render a single service block for docker-compose.yml."""
+    return (
+        f"  web-{challenge_id}:\n"
+        f"    build: ./challenge-web-{challenge_id}\n"
+        f"    container_name: ctf-web-{challenge_id}\n"
+        f"    restart: unless-stopped\n"
+        f"    ports:\n"
+        f"      - \"{port_web}:80\"\n"
+        f"      - \"{port_ttyd}:7681\"\n"
+        f"    networks:\n"
+        f"      - ctf-net\n"
+    )
+
+
+def generate_challenges(base_dir: Path) -> None:
+    """Write standalone challenge directories and an idempotent docker-compose.yml."""
+    service_blocks = [render_service_entry("001", 8001, 7681)]
+
+    for challenge in CHALLENGES:
+        ch_dir = base_dir / f"challenge-web-{challenge['id']}"
+        ch_dir.mkdir(parents=True, exist_ok=True)
+        (ch_dir / "app.py").write_text(challenge["script"].strip(), encoding="utf-8")
+        (ch_dir / "Dockerfile").write_text(render_dockerfile(challenge), encoding="utf-8")
+        service_blocks.append(
+            render_service_entry(challenge["id"], challenge["port_web"], challenge["port_ttyd"])
+        )
+
+    compose_content = (
+        "services:\n"
+        + "\n".join(service_blocks)
+        + "\nnetworks:\n  ctf-net:\n    driver: bridge\n"
+    )
+    (base_dir / "docker-compose.yml").write_text(compose_content, encoding="utf-8")
+
+
+if __name__ == "__main__":
+    generate_challenges(BASE_DIR)
+    print("Challenge directories and docker-compose.yml generated.")

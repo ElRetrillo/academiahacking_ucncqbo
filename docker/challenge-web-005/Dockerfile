@@ -1,13 +1,7 @@
-\
-# ================================================================
-# Reto CTF de EclipSec
-# ================================================================
-
 FROM ubuntu:22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Instalar dependencias
 RUN apt-get update && apt-get install -y --no-install-recommends \
     nginx \
     curl \
@@ -23,7 +17,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 RUN pip3 install flask
 
-# Instalar ttyd
 RUN ARCH=$(uname -m) && \
     if [ "$ARCH" = "x86_64" ]; then TTYD_ARCH="x86_64"; \
     elif [ "$ARCH" = "aarch64" ]; then TTYD_ARCH="aarch64"; \
@@ -32,16 +25,12 @@ RUN ARCH=$(uname -m) && \
         -o /usr/local/bin/ttyd && \
     chmod +x /usr/local/bin/ttyd
 
-# Script del reto
 RUN mkdir -p /app
 COPY app.py /app/app.py
 
-# Create challenge files at build time (not at runtime) so they are
-# always available regardless of how the Python process starts.
-RUN echo 'Welcome to the home page.' > /app/home.txt
-RUN echo 'EclipSec{l0c4l_f1l3_1nclus10n_m4st3r}' > /flag.txt
+RUN echo 'Welcome to the home page.' > /app/home.txt && \
+    echo 'EclipSec{l0c4l_f1l3_1nclus10n_m4st3r}' > /flag.txt
 
-# Nginx
 RUN cat > /start.sh << 'STARTSCRIPT'
 #!/bin/bash
 set -e
@@ -54,16 +43,16 @@ server {
 
     location / {
         proxy_pass http://127.0.0.1:8000/;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
     }
 
     location /ws/ {
         proxy_pass http://127.0.0.1:7681/;
         proxy_http_version 1.1;
-        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
-        proxy_set_header Host \$host;
+        proxy_set_header Host $host;
     }
 }
 NGINXCONF

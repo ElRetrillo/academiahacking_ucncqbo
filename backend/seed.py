@@ -51,7 +51,7 @@ CHALLENGES_DATA = [
         "flag": "EclipSec{p1ng_0f_d34th_cmdi}",
         "description": "Exploit an unsanitized command injection flaw inside a network ping diagnostic tool.",
         "target_url": "/web-004/",
-        "hints": "Use command separators like ; or && to chain shell commands.",
+        "hints": "Use command separators like ; or && to chain shell commands (e.g. cat flag.txt).",
     },
     {
         "slug": "web-005",
@@ -128,7 +128,7 @@ CHALLENGES_DATA = [
         "flag": "EclipSec{c0mm4nd_3x3cut10n_v1a_g3t}",
         "description": "Perform Remote Command Execution through an unvalidated administrative GET query parameter.",
         "target_url": "/web-011/",
-        "hints": "Use ?cmd=cat+/flag.txt to dump the target flag.",
+        "hints": "Use ?cmd=cat+flag.txt to dump the target flag.",
     },
     {
         # First "local" challenge: downloaded from the public challenge repo and

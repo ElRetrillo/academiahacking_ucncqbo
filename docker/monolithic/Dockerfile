@@ -18,18 +18,16 @@ RUN ARCH=$(uname -m) && \
 
 ENV FLAG='EclipSec{sst1_t3mpl4t3_1nj3ct10n}'
 
-# Copy only the monolithic directory contents to /app
-# Railway build context is the repo root, so we need the full path
 COPY docker/monolithic/ /app/
 RUN chmod +x /app/start.sh
 
-# Web-005 files setup
-RUN echo 'Welcome to the home page.' > /app/web-005/home.txt
-
-# Web-005: flag available as absolute path /flag.txt AND relative flag.txt from CWD
-RUN echo 'EclipSec{l0c4l_f1l3_1nclus10n_m4st3r}' > /flag.txt && \
+RUN echo 'Welcome to the home page.' > /app/web-005/home.txt && \
+    echo 'EclipSec{l0c4l_f1l3_1nclus10n_m4st3r}' > /flag.txt && \
     cp /flag.txt /app/web-005/flag.txt && \
-    echo 'EclipSec{c0mm4nd_3x3cut10n_v1a_g3t}' > /flag_web011.txt
+    echo 'EclipSec{p1ng_0f_d34th_cmdi}' > /flag_web004.txt && \
+    cp /flag_web004.txt /app/web-004/flag.txt && \
+    echo 'EclipSec{c0mm4nd_3x3cut10n_v1a_g3t}' > /flag_web011.txt && \
+    cp /flag_web011.txt /app/web-011/flag.txt
 
 EXPOSE 80
 
