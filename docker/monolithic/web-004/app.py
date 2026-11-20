@@ -1,5 +1,6 @@
-import os
+import subprocess
 from flask import Flask, request, render_template_string
+
 app = Flask(__name__)
 
 template = '''
@@ -14,15 +15,27 @@ template = '''
 </body></html>
 '''
 
+
 @app.route('/', methods=['GET', 'POST'])
 def index():
     output = ''
     if request.method == 'POST':
         ip = request.form.get('ip', '')
-        # VULNERABLE
-        output = os.popen(f'ping -c 1 {ip}').read()
+        try:
+            # Intentional command injection vulnerability for CTF training
+            result = subprocess.run(
+                f'ping -c 1 {ip}',
+                shell=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                timeout=10,
+            )
+            output = result.stdout
+        except subprocess.TimeoutExpired:
+            output = 'Command timed out'
     return render_template_string(template, output=output)
 
+
 if __name__ == '__main__':
-    with open('/flag_web004.txt', 'w') as f: f.write('EclipSec{p1ng_0f_d34th_cmdi}')
     app.run(host='127.0.0.1', port=8004)

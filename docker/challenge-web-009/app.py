@@ -1,5 +1,15 @@
-from flask import Flask, request
+from pathlib import Path
+from flask import Flask
+
 app = Flask(__name__)
+FLAG_PATH = Path(__file__).resolve().parent / ".flag"
+
+
+def read_flag() -> str:
+    if FLAG_PATH.exists():
+        return FLAG_PATH.read_text(encoding="utf-8").strip()
+    return ""
+
 
 @app.route('/')
 def index():
@@ -10,14 +20,15 @@ def index():
     </body></html>
     '''
 
+
 @app.route('/index.bak')
 def bak():
-    return '''
+    return f'''
 # Backup file
 def login():
-    password = "EclipSec{b4ckup_f1l3s_4r3_l34ks}"
-    # TODO: Implement database auth
+    password = "{read_flag()}"
 '''
+
 
 if __name__ == '__main__':
     app.run(host='127.0.0.1', port=8000)

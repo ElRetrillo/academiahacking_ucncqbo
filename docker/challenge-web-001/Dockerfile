@@ -1,46 +1,15 @@
-# ================================================================
-# Dockerfile de ejemplo para un reto CTF de EclipSec
-# (reto tipo WEB con terminal interactiva vía ttyd)
-#
-# Expone:
-#   - Puerto 8001 → aplicación web vulnerable (nginx)
-#   - Puerto 7681 → ttyd (terminal WebSocket para xterm.js)
-#
-# Uso:
-#   docker build -t eclipsec-web-001 .
-#   docker run -d -p 8001:80 -p 7681:7681 --name web-001 eclipsec-web-001
-#
-# Desde la página del reto la terminal conectará a:
-#   ws://localhost:7681/ws
-# ================================================================
-
 FROM ubuntu:22.04
 
-# Evitar prompts interactivos
 ENV DEBIAN_FRONTEND=noninteractive
 
-# ── Herramientas base y ttyd ─────────────────────────────────────
 RUN apt-get update && apt-get install -y --no-install-recommends \
     nginx \
-    curl \
-    wget \
     ca-certificates \
     bash \
-    procps \
-    net-tools \
     && rm -rf /var/lib/apt/lists/*
 
-# ── Instalar ttyd (terminal web) 1.7.4 dependiendo de arquitectura ─
-RUN ARCH=$(uname -m) && \
-    if [ "$ARCH" = "x86_64" ]; then TTYD_ARCH="x86_64"; \
-    elif [ "$ARCH" = "aarch64" ]; then TTYD_ARCH="aarch64"; \
-    else echo "Unsupported architecture: $ARCH" && exit 1; fi && \
-    curl -sSL "https://github.com/tsl0922/ttyd/releases/download/1.7.4/ttyd.${TTYD_ARCH}" \
-        -o /usr/local/bin/ttyd && \
-    chmod +x /usr/local/bin/ttyd
+ARG CHALLENGE_FLAG='EclipSec{h1dd3n_1n_pl41n_s1ght}'
 
-
-# ── Contenido web del reto (Premium UI) ───────────────────────────
 RUN mkdir -p /var/www/html/assets
 RUN echo 'body { \
     background: radial-gradient(circle at center, #1a1a2e 0%, #16213e 100%); \
@@ -96,45 +65,50 @@ button { \
 button:hover { background: #ff2e63; box-shadow: 0 0 15px rgba(233, 69, 96, 0.4); } \
 .footer { margin-top: 1.5rem; font-size: 0.7rem; opacity: 0.5; }' > /var/www/html/style.css
 
-RUN echo '<!DOCTYPE html> \
-<html lang="es"> \
-<head> \
-    <meta charset="UTF-8"> \
-    <meta name="viewport" content="width=device-width, initial-scale=1.0"> \
-    <title>Acceso Restringido - SecureCorp</title> \
-    <link rel="stylesheet" href="style.css"> \
-</head> \
-<body> \
-    <div class="login-card"> \
-        <h1>SecureCorp</h1> \
-        <p style="font-size: 0.9rem; margin-bottom: 2rem; opacity: 0.7;">Portal Interno de Administración</p> \
-        <form method="POST" action="/login"> \
-            <div class="input-group"> \
-                <label>Usuario</label> \
-                <input type="text" name="user" placeholder="Introduzca su ID" required> \
-            </div> \
-            <div class="input-group"> \
-                <label>Contraseña</label> \
-                <input type="password" name="password" placeholder="••••••••" required> \
-            </div> \
-            <button type="submit">Autenticar</button> \
-        </form> \
-        <div class="footer"> \
-            &copy; 2026 SecureCorp Defence Systems. Todos los derechos reservados. \
-            <!-- DEBUG_MODE: Enabled --> \
-            <!-- Credenciales de emergencia (borrar en prod): admin / s3cur3p4ss --> \
-            <!-- Pista: ¿Has mirado debajo de la alfombra digital? EclipSec{h1dd3n_1n_pl41n_s1ght} --> \
-        </div> \
-    </div> \
-</body> \
-</html>' > /var/www/html/index.html
+RUN cat > /var/www/html/index.html << 'HTMLDOC'
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Acceso Restringido - SecureCorp</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="login-card">
+        <h1>SecureCorp</h1>
+        <p style="font-size: 0.9rem; margin-bottom: 2rem; opacity: 0.7;">Portal Interno de Administración</p>
+        <form method="POST" action="/login">
+            <div class="input-group">
+                <label>Usuario</label>
+                <input type="text" name="user" placeholder="Introduzca su ID" required>
+            </div>
+            <div class="input-group">
+                <label>Contraseña</label>
+                <input type="password" name="password" placeholder="••••••••" required>
+            </div>
+            <button type="submit">Autenticar</button>
+        </form>
+        <div class="footer">
+            &copy; 2026 SecureCorp Defence Systems. Todos los derechos reservados.
+            <!-- DEBUG_MODE: Enabled -->
+            <!-- Credenciales de emergencia (borrar en prod): admin / s3cur3p4ss -->
+            <!-- Pista: ¿Has mirado debajo de la alfombra digital? __CHALLENGE_FLAG__ -->
+        </div>
+    </div>
+</body>
+</html>
+HTMLDOC
 
-# ── Script de arranque ────────────────────────────────────────────
-RUN cat > /start.sh << 'STARTSCRIPT'
+RUN bash -c 'tpl=$(cat /var/www/html/index.html); printf "%s\n" "${tpl//__CHALLENGE_FLAG__/$CHALLENGE_FLAG}" > /var/www/html/index.html' && \
+    chown -R root:www-data /var/www/html && \
+    chmod 750 /var/www/html /var/www/html/assets && \
+    chmod 640 /var/www/html/index.html /var/www/html/style.css
+
+RUN cat > /usr/local/sbin/start.sh << 'STARTSCRIPT'
 #!/bin/bash
 set -e
 
-# Create nginx config
 cat > /etc/nginx/sites-available/default << 'NGINXCONF'
 server {
     listen 80 default_server;
@@ -146,39 +120,15 @@ server {
     location / {
         try_files $uri $uri/ =404;
     }
-
-    # Proxy para ttyd (WebSocket)
-    location /ws/ {
-        proxy_pass http://127.0.0.1:7681/;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_set_header Host $host;
-    }
 }
 NGINXCONF
 
-# Verify nginx config is valid before starting
 nginx -t
 
-# Start ttyd in background
-ttyd \
-    --port 7681 \
-    --writable \
-    --cwd /root \
-    -t title="CTF Shell" \
-    --base-path /ws \
-    bash &
-
-# Start nginx in foreground (becomes PID 1 / main process)
 exec nginx -g "daemon off;"
 STARTSCRIPT
-RUN chmod +x /start.sh
+RUN chown root:root /usr/local/sbin/start.sh && chmod 700 /usr/local/sbin/start.sh
 
-# ── Archivo de flag dentro del contenedor ─────────────────────────
-RUN echo 'EclipSec{h1dd3n_1n_pl41n_s1ght}' > /flag.txt && chmod 644 /flag.txt
+EXPOSE 80
 
-# ── Exponer puertos ───────────────────────────────────────────────
-EXPOSE 80 7681
-
-CMD ["/start.sh"]
+CMD ["/usr/local/sbin/start.sh"]

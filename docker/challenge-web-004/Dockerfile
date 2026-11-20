@@ -4,34 +4,28 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     nginx \
-    curl \
-    wget \
     ca-certificates \
     bash \
-    procps \
-    net-tools \
     python3 \
     python3-pip \
     iputils-ping \
     && rm -rf /var/lib/apt/lists/*
 
-RUN pip3 install flask
+RUN pip3 install --no-cache-dir flask
 
-RUN ARCH=$(uname -m) && \
-    if [ "$ARCH" = "x86_64" ]; then TTYD_ARCH="x86_64"; \
-    elif [ "$ARCH" = "aarch64" ]; then TTYD_ARCH="aarch64"; \
-    else echo "Unsupported architecture: $ARCH" && exit 1; fi && \
-    curl -sSL "https://github.com/tsl0922/ttyd/releases/download/1.7.4/ttyd.${TTYD_ARCH}" \
-        -o /usr/local/bin/ttyd && \
-    chmod +x /usr/local/bin/ttyd
+RUN useradd --system --no-create-home --shell /usr/sbin/nologin ctf
+
+ARG CHALLENGE_FLAG='EclipSec{p1ng_0f_d34th_cmdi}'
 
 RUN mkdir -p /app
 COPY app.py /app/app.py
 
-RUN echo 'EclipSec{p1ng_0f_d34th_cmdi}' > /flag.txt && \
-    cp /flag.txt /app/flag.txt
+RUN printf '%s\n' "$CHALLENGE_FLAG" > /app/flag.txt && \
+    chown -R root:ctf /app && \
+    chmod 550 /app && \
+    chmod 440 /app/app.py /app/flag.txt
 
-RUN cat > /start.sh << 'STARTSCRIPT'
+RUN cat > /usr/local/sbin/start.sh << 'STARTSCRIPT'
 #!/bin/bash
 set -e
 
@@ -45,34 +39,19 @@ server {
         proxy_pass http://127.0.0.1:8000/;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
-    }
-
-    location /ws/ {
-        proxy_pass http://127.0.0.1:7681/;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     }
 }
 NGINXCONF
 
 nginx -t
 
-ttyd \
-    --port 7681 \
-    --writable \
-    --cwd /root \
-    -t title="CTF Shell" \
-    --base-path /ws \
-    bash &
-
-cd /app && python3 app.py &
+su -s /bin/sh ctf -c "cd /app && exec python3 app.py" &
 
 exec nginx -g "daemon off;"
 STARTSCRIPT
-RUN chmod +x /start.sh
+RUN chown root:root /usr/local/sbin/start.sh && chmod 700 /usr/local/sbin/start.sh
 
-EXPOSE 80 7681
+EXPOSE 80
 
-CMD ["/start.sh"]
+CMD ["/usr/local/sbin/start.sh"]
