@@ -4,7 +4,6 @@ from httpx import AsyncClient
 
 @pytest.mark.asyncio
 async def test_register_and_login(client: AsyncClient):
-    # 1. Register
     reg_payload = {
         "username": "new_player",
         "email": "player@eclipsec.cl",
@@ -20,7 +19,6 @@ async def test_register_and_login(client: AsyncClient):
     assert "created_at" in user_data
     assert "last_connected_at" in user_data
 
-    # 2. Login
     login_payload = {
         "username_or_email": "new_player",
         "password": "supersecurepassword123",
@@ -31,7 +29,6 @@ async def test_register_and_login(client: AsyncClient):
     assert "access_token" in token_data
     assert token_data["user"]["username"] == "new_player"
 
-    # 3. Get /me with token
     headers = {"Authorization": f"Bearer {token_data['access_token']}"}
     me_resp = await client.get("/api/v1/auth/me", headers=headers)
     assert me_resp.status_code == 200
@@ -66,23 +63,27 @@ async def test_update_profile(client: AsyncClient, user_token: str):
 
 
 @pytest.mark.asyncio
-async def test_first_user_is_admin_subsequent_is_user(client: AsyncClient):
-    # Register 1st user
-    r1 = await client.post("/api/v1/auth/register", json={
-        "username": "first_hacker",
-        "email": "first@eclipsec.cl",
-        "password": "password123",
-        "nationality": "CL"
-    })
+async def test_public_registration_never_grants_admin(client: AsyncClient):
+    r1 = await client.post(
+        "/api/v1/auth/register",
+        json={
+            "username": "first_hacker",
+            "email": "first@eclipsec.cl",
+            "password": "password123",
+            "nationality": "CL",
+        },
+    )
     assert r1.status_code == 201
-    assert r1.json()["role"] == "admin"
+    assert r1.json()["role"] == "user"
 
-    # Register 2nd user
-    r2 = await client.post("/api/v1/auth/register", json={
-        "username": "second_hacker",
-        "email": "second@eclipsec.cl",
-        "password": "password123",
-        "nationality": "AR"
-    })
+    r2 = await client.post(
+        "/api/v1/auth/register",
+        json={
+            "username": "second_hacker",
+            "email": "second@eclipsec.cl",
+            "password": "password123",
+            "nationality": "AR",
+        },
+    )
     assert r2.status_code == 201
     assert r2.json()["role"] == "user"

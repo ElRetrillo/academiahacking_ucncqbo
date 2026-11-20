@@ -2,7 +2,7 @@
 
 **Base URL (Local):** `http://localhost:8000`
 **Documentacion OpenAPI Interactiva:** `/docs` (Swagger UI) y `/redoc` (ReDoc)
-**Estado del Contrato:** Documentacion fiel al codigo vigente en `backend/app/api/v1/`, incluyendo notas de migracion de seguridad hacia la Fase 3.
+**Estado del Contrato:** Documentacion actualizada tras el endurecimiento DevSecOps de Fase 3 en `backend/app/api/v1/`.
 
 ---
 
@@ -10,16 +10,15 @@
 
 ### Regla de Integracion Segura para Navegadores
 
-En el estado actual del backend, los endpoints protegidos de `/api/v1/*` aceptan autenticacion mediante cabecera `Authorization: Bearer <jwt>`. No obstante, conforme al estandar definido en [STANDARDS.md](./STANDARDS.md):
-
-- **En navegador web (`eclipsec.cl`)**: El codigo cliente JavaScript **nunca** debe almacenar el JWT en `localStorage` ni enviar el token directamente en vistas de red desde el navegador. El frontend Next.js debe operar como un **BFF (Backend for Frontend)** en servidor (Route Handlers / Server Actions) o recibir sesion mediante cookies `HttpOnly; Secure; SameSite=Lax` (a habilitar en Fase 3).
-- **En terminal (`eclipsecCLI`)**: Puede utilizar autenticacion Bearer desde consola hacia los endpoints de retos e instancias.
+- **Navegador web (`eclipsec.cl`)**: Debe utilizar `POST /api/v1/auth/session/login` (que emite cookie `HttpOnly` + cookie CSRF `eclipsec_csrf` sin tokens en el cuerpo JSON) o operar detras de un **BFF (Backend for Frontend)** en Next.js. En peticiones mutadoras (`POST`, `PUT`, `PATCH`, `DELETE`) autenticadas por cookie se exige la cabecera `X-CSRF-Token` coincidente con la cookie `eclipsec_csrf`.
+- **Terminal (`eclipsecCLI`) y BFF server-side**: Utilizan `POST /api/v1/auth/login` obteniendo un token Bearer acotado (`typ="cli"`).
 
 ### Formatos y Codigos de Estado
 
 - Content-Type de entrada y salida: `application/json` (UTF-8).
-- Fechas en formato ISO 8601 con zona horaria UTC (en `/api/ctf-academy` las fechas se serializan como epoch en milisegundos).
-- Errores estandar FastAPI (`400`, `401`, `403`, `404`, `422`): `{"detail": "Mensaje descriptivo"}`.
+- Fechas en formato ISO 8601 UTC (en `/api/ctf-academy` se serializan como epoch en milisegundos).
+- Errores estandar FastAPI (`400`, `401`, `403`, `404`, `422`, `429`): `{"detail": "Mensaje descriptivo"}`.
+- Limite de tasa (`429 Too Many Requests`): Incluye cabecera `Retry-After` en segundos en endpoints de autenticacion y envio de flags.
 
 ---
 
@@ -42,7 +41,7 @@ Respuesta `200 OK`:
 ## 3. Autenticacion (`/api/v1/auth`)
 
 ### `POST /api/v1/auth/register`
-Registra una nueva cuenta de jugador y devuelve su perfil inicial.
+Registra una nueva cuenta de jugador (siempre con `role: "user"` salvo habilitacion explicita por configuracion). Sujeto a rate limiting.
 
 - **Body (`RegisterRequest`)**:
   - `username`: string (3-50 caracteres, regex `^[a-zA-Z0-9_-]+$`)
@@ -54,7 +53,7 @@ Registra una nueva cuenta de jugador y devuelve su perfil inicial.
 {
   "id": "uuid",
   "username": "jugador_ucn",
-  "email": "jugador@eclipsec.cl",
+  "email": "jugador@example.test",
   "nationality": "CL",
   "role": "user",
   "score": 0,
@@ -64,21 +63,47 @@ Registra una nueva cuenta de jugador y devuelve su perfil inicial.
   "solves_count": 0
 }
 ```
-- **Nota de auditoria (SEC-04):** Actualmente, si la tabla `users` esta vacia, el primer usuario registrado recibe `role: "admin"`. Este comportamiento sera eliminado en Fase 3.
 
 ### `POST /api/v1/auth/login`
-Autentica por `username` o `email` y retorna `TokenResponse`.
+Autentica por `username` o `email` y retorna `TokenResponse` (`typ="cli"`) para `eclipsecCLI` o servidor BFF. Sujeto a rate limiting.
 
 - **Body (`LoginRequest`)**: `{"username_or_email": "...", "password": "..."}`
 - **Respuesta `200 OK` (`TokenResponse`)**: `{"access_token": "<token>", "token_type": "bearer", "user": { ... }}`
-- **Uso esperado:** Consumido desde servidor BFF (portal web) o desde `eclipsecCLI`.
+
+### `POST /api/v1/auth/session/login`
+Autentica una sesion web emitiendo cookie `HttpOnly` (`eclipsec_session`) y cookie CSRF (`eclipsec_csrf`) sin exponer ningun token en el cuerpo JSON. Sujeto a rate limiting.
+
+- **Body (`LoginRequest`)**: `{"username_or_email": "...", "password": "..."}`
+- **Respuesta `200 OK` (`SessionResponse`)**:
+```json
+{
+  "authenticated": true,
+  "user": {
+    "id": "uuid",
+    "username": "jugador_ucn",
+    "email": "jugador@example.test",
+    "nationality": "CL",
+    "role": "user",
+    "score": 0,
+    "created_at": "2026-11-20T14:00:00Z",
+    "last_connected_at": "2026-11-20T14:00:00Z",
+    "is_active": true,
+    "solves_count": 0
+  }
+}
+```
+
+### `POST /api/v1/auth/session/logout` y `POST /api/v1/auth/logout`
+Revoca el `jti` del token activo en la tabla `revoked_tokens` y elimina las cookies de sesion/CSRF. Si autentica mediante cookie, exige cabecera `X-CSRF-Token`.
+
+- **Respuesta `200 OK` (`LogoutResponse`)**: `{"authenticated": false, "message": "Session closed."}`
 
 ### `GET /api/v1/auth/me`
-- **Autenticacion:** Requerida (`Bearer`).
-- **Respuesta `200 OK` (`UserProfileDetail`)**: Perfil completo del jugador autenticado, incluyendo estadisticas, rango, conteo por categoria y ultimos 10 retos resueltos.
+- **Autenticacion:** Requerida (cookie `HttpOnly` o `Bearer`).
+- **Respuesta `200 OK` (`UserProfileDetail`)**: Perfil privado completo del jugador autenticado, incluyendo `email`, `role`, `last_connected_at`, estadisticas, rango y ultimos 10 retos resueltos.
 
 ### `PUT /api/v1/auth/me`
-- **Autenticacion:** Requerida (`Bearer`).
+- **Autenticacion:** Requerida (cookie `HttpOnly` + `X-CSRF-Token`, o `Bearer`).
 - **Body (`UserUpdate`)**: `nationality` (opcional), `current_password` (requerida si cambia password), `new_password` (opcional, 6-100 caracteres).
 - **Respuesta `200 OK` (`UserProfile`)**.
 
@@ -89,14 +114,14 @@ Autentica por `username` o `email` y retorna `TokenResponse`.
 ### `GET /api/v1/challenges`
 Lista todos los retos activos ordenados por `points ASC, slug ASC`.
 - **Query params opcionales:** `category`, `difficulty` (`EASY`, `MEDIUM`, `HARD`, `INSANE`).
-- **Autenticacion:** Opcional. Si hay sesion valida, marca `is_solved: true/false` para el jugador actual.
-- **Resolucion de `target_url`**: Si el valor guardado es relativo (ej. `/web-001/`) y `CHALLENGES_BASE_URL` esta configurado, devuelve la URL absoluta. Nunca expone el campo `flag`.
+- **Autenticacion:** Opcional. Marca `is_solved: true/false` para el jugador actual.
+- **Resolucion de `target_url`**: Si es relativa y `CHALLENGES_BASE_URL` esta configurado, devuelve la URL absoluta. Nunca expone el campo `flag`.
 
 ### `GET /api/v1/challenges/recent`
 Retorna los retos activos mas recientes (`limit` entre 1 y 20, default `5`).
 
 ### `GET /api/v1/challenges/categories`
-Retorna el resumen de categorias activas y cantidad de retos disponibles:
+Retorna categorias activas y cantidad de retos disponibles:
 ```json
 [
   {
@@ -110,9 +135,9 @@ Retorna el resumen de categorias activas y cantidad de retos disponibles:
 Obtiene el detalle publico (`ChallengePublic`) de un reto activo buscando por UUID o `slug`. Incluye metadatos CLI (`version`, `repository`, `path`) cuando corresponden a retos locales.
 
 ### `POST /api/v1/challenges/{challenge_id_or_slug}/submit`
-- **Autenticacion:** Requerida (`Bearer`).
+- **Autenticacion:** Requerida (cookie `HttpOnly` + `X-CSRF-Token`, o `Bearer`). Sujeto a rate limiting (`429` + `Retry-After`).
 - **Body (`FlagSubmissionRequest`)**: `{"flag": "EclipSec{...}"}`
-- **Comportamiento:** Verifica la flag en tiempo constante (`hmac.compare_digest`), registra el intento en `submissions` y evita doble puntuacion si el reto ya fue resuelto por el jugador.
+- **Comportamiento:** Verifica la flag en tiempo constante contra su resumen `HMAC-SHA256`, registra el hash del intento en `submissions` (nunca en texto plano) y evita doble puntuacion.
 - **Respuesta `200 OK` (`FlagSubmissionResponse`)**:
 ```json
 {
@@ -124,35 +149,12 @@ Obtiene el detalle publico (`ChallengePublic`) de un reto activo buscando por UU
 ```
 
 ### `POST /api/v1/challenges/{challenge_id_or_slug}/start`
-- **Autenticacion:** Requerida (`Bearer`).
-- **Descripcion:** Inicia (o retorna de forma idempotente si ya existe una sesion `running`) un registro `ChallengeInstance` con los metadatos necesarios para que `eclipsecCLI` descargue y ejecute el reto localmente. El backend nunca ejecuta contenedores Docker.
-- **Respuesta `200 OK` (`ChallengeInstanceResponse`)**:
-```json
-{
-  "id": "uuid",
-  "status": "running",
-  "created_at": "2026-11-20T14:00:00Z",
-  "started_at": "2026-11-20T14:00:00Z",
-  "stopped_at": null,
-  "expiration_at": null,
-  "challenge": {
-    "id": "uuid",
-    "slug": "web-sqli-001",
-    "title": "Login Bypass",
-    "category": "web",
-    "difficulty": "EASY",
-    "points": 100,
-    "version": "1.0",
-    "repository": "ElRetrillo/retos_ctf",
-    "path": "web/sqli-001",
-    "target_url": null
-  }
-}
-```
+- **Autenticacion:** Requerida (cookie `HttpOnly` + `X-CSRF-Token`, o `Bearer`).
+- **Descripcion:** Inicia (o retorna de forma idempotente si ya existe una sesion `running`) un registro `ChallengeInstance` con los metadatos necesarios para que `eclipsecCLI` descargue y ejecute el reto localmente.
 
 ### `POST /api/v1/challenges/{challenge_id_or_slug}/stop`
-- **Autenticacion:** Requerida (`Bearer`).
-- **Descripcion:** Marca la instancia activa (`running`) del jugador para ese reto como `stopped` y registra `stopped_at`. Retorna `404` si no existe instancia activa.
+- **Autenticacion:** Requerida (cookie `HttpOnly` + `X-CSRF-Token`, o `Bearer`).
+- **Descripcion:** Marca la instancia activa (`running`) del jugador como `stopped`. Retorna `404` si no existe instancia activa.
 
 ---
 
@@ -160,26 +162,13 @@ Obtiene el detalle publico (`ChallengePublic`) de un reto activo buscando por UU
 
 ### `GET /api/v1/leaderboard`
 - **Query param:** `limit` (1 a 500, default `100`).
-- **Criterios de ordenamiento:**
-  1. `score DESC`
-  2. `last_solve_at ASC NULLS LAST` (quien alcanzo primero el puntaje gana el desempate)
-  3. `created_at ASC`
-- Solo incluye cuentas activas con `role == "user"`.
+- **Criterios de ordenamiento:** `score DESC`, `last_solve_at ASC NULLS LAST`, `created_at ASC`. Solo incluye cuentas activas con `role == "user"`.
 
 ### `GET /api/v1/leaderboard/countries`
-Retorna metricas agregadas por `nationality` (`total_players`, `total_score`, `total_solves`), ordenadas por puntaje total y resoluciones totales descendentes.
+Retorna metricas agregadas por `nationality` (`total_players`, `total_score`, `total_solves`).
 
 ### `GET /api/v1/users/{username}/profile`
-Retorna `UserProfileDetail` con rango calculado segun puntaje:
-- `0`: `Noob`
-- `< 500`: `Script Kiddie`
-- `< 1000`: `Hacker`
-- `< 2000`: `Pro Hacker`
-- `< 4000`: `Elite Hacker`
-- `< 8000`: `Guru`
-- `>= 8000`: `Omniscient`
-
-- **Nota de auditoria (SEC-07):** Este endpoint actualmente no exige autenticacion y expone `email`, `role` y `is_active`. En Fase 3 dichos campos seran removidos de la vista publica.
+Retorna `UserPublicProfileDetail` (sin `email`, `role`, `is_active` ni `last_connected_at`) con rango calculado segun puntaje (`Noob`, `Script Kiddie`, `Hacker`, `Pro Hacker`, `Elite Hacker`, `Guru`, `Omniscient`).
 
 ---
 
@@ -189,9 +178,9 @@ Todos los endpoints requieren usuario autenticado con `role == "admin"` (respond
 
 | Metodo | Ruta | Descripcion |
 |---|---|---|
-| `GET` | `/api/v1/admin/challenges` | Lista todos los retos incluyendo campos internos (`flag`, `is_active`, `created_at`) |
-| `POST` | `/api/v1/admin/challenges` | Crea un reto (`ChallengeCreate`) |
-| `PUT` | `/api/v1/admin/challenges/{challenge_id}` | Actualiza campos de un reto (`ChallengeUpdate`) |
+| `GET` | `/api/v1/admin/challenges` | Lista todos los retos con `flag: "[REDACTED]"` y `flag_configured: bool` |
+| `POST` | `/api/v1/admin/challenges` | Crea un reto almacenando resumen `HMAC-SHA256` (`ChallengeCreate`) |
+| `PUT` | `/api/v1/admin/challenges/{challenge_id}` | Actualiza campos o rota el hash de flag (`ChallengeUpdate`) |
 | `DELETE` | `/api/v1/admin/challenges/{challenge_id}` | Elimina un reto (`204 No Content`) |
 | `GET` | `/api/v1/admin/users` | Lista todos los usuarios registrados con su `solves_count` |
 | `PUT` | `/api/v1/admin/users/{user_id}` | Actualiza `role`, `is_active`, `nationality` o `score` de un usuario |
@@ -200,23 +189,23 @@ Todos los endpoints requieren usuario autenticado con `role == "admin"` (respond
 
 ## 7. Adaptador Legacy (`POST /api/ctf-academy`)
 
-Mantiene compatibilidad con el contrato RPC historico del frontend mediante un cuerpo JSON `{ "action": "...", ... }`:
+Mantiene compatibilidad con el contrato RPC historico mediante `{ "action": "...", ... }`, endurecido en Fase 3 con cookies `HttpOnly` + CSRF, rate limiting, revocacion real de `jti` y cero tokens expuestos en el payload JSON:
 
 | Accion | Parametros | Comportamiento Vigente |
 |---|---|---|
-| `register` | `username`, `password` | Crea usuario con correo sintetico `<username>@ctf.eclipsec.cl` y retorna estado de academia |
-| `login` | `username`, `password` | Autentica y retorna estado de academia |
-| `logout` | Ninguno | Responde `ok: true` (sin revocacion de sesion en servidor actualmente) |
-| `state` | Header `Authorization` opcional | Retorna `leaderboard` (top 50), `participants`, `currentUser` y `session` |
-| `complete` | `challengeId`, `flag` (Auth requerido) | Valida flag y retorna estado actualizado |
+| `register` | `username`, `password` (min 6) | Registra cuenta (`role: "user"`), emite cookies `HttpOnly` + CSRF y retorna estado sin `token` en JSON |
+| `login` | `username`, `password` | Autentica, emite cookies `HttpOnly` + CSRF y retorna estado sin `token` en JSON |
+| `logout` | Cookie / Bearer (+ `X-CSRF-Token`) | Revoca `jti` en `revoked_tokens` y limpia cookies |
+| `state` | Cookie o `Authorization` opcional | Retorna `leaderboard` (top 50), `participants`, `currentUser` y `session` |
+| `complete` | `challengeId`, `flag` (+ `X-CSRF-Token` en cookie) | Valida flag con HMAC y retorna estado actualizado |
 
-Este endpoint se encuentra marcado para migracion controlada hacia los recursos REST `/api/v1/*` tras habilitar la capa BFF del portal web.
+Este endpoint permanece programado para retiro controlado tras la migracion completa hacia `/api/v1/*` en Fase 4-6.
 
 ---
 
 ## 8. Patron de Cliente Seguro para Frontend Next.js (BFF)
 
-Ejemplo de cliente del lado del servidor Next.js (Route Handler / Server Action) donde las credenciales y tokens se procesan exclusivamente en el backend de Vercel y nunca se exponen en `localStorage` ni en respuestas hacia el navegador:
+Ejemplo de cliente del lado del servidor Next.js (Route Handler / Server Action) donde las credenciales y tokens nunca se exponen en `localStorage` ni al navegador:
 
 ```typescript
 import { cookies } from 'next/headers';
@@ -255,5 +244,3 @@ export async function backendServerFetch<T>(
   return response.json() as Promise<T>;
 }
 ```
-
-Desde los componentes React del navegador, los formularios y acciones solo llaman a rutas internas del propio frontend (`/api/session/login`, `/api/challenges`), las cuales gestionan la cookie `HttpOnly` sin exponer tokens en vistas de red ni en almacenamiento del navegador.

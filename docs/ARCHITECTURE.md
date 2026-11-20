@@ -99,8 +99,8 @@ erDiagram
         string category "web, pwn, crypto, etc."
         string difficulty "EASY | MEDIUM | HARD | INSANE"
         int points
-        string flag "Pendiente remocion por hash HMAC"
-        string flag_hash "SHA-256 actual"
+        string flag "Almacena [REDACTED]"
+        string flag_hash "HMAC-SHA256 con clave de servidor"
         string target_url "Ruta relativa o URL"
         text hints
         string version "Default 1.0"
@@ -110,6 +110,12 @@ erDiagram
         int solves_count
         datetime created_at
         datetime updated_at
+    }
+
+    REVOKED_TOKENS {
+        string jti PK "UUID (36)"
+        datetime expires_at
+        datetime revoked_at
     }
 
     SOLVES {
@@ -151,7 +157,7 @@ erDiagram
 
 ## 4. Flujos Criticos de Secuencia
 
-### Flujo A: Autenticacion Segura sin Exposicion de Tokens en Navegador (Objetivo Fase 3)
+### Flujo A: Autenticacion Segura sin Exposicion de Tokens en Navegador (Implementado en Fase 3)
 
 ```mermaid
 sequenceDiagram
@@ -161,15 +167,15 @@ sequenceDiagram
     participant DB as "Base de Datos"
 
     Browser->>BFF: "POST /api/session/login (credenciales)"
-    BFF->>API: "POST /api/v1/auth/login"
+    BFF->>API: "POST /api/v1/auth/session/login o /login"
     API->>DB: "SELECT user + verify_password (bcrypt)"
     DB-->>API: "Usuario valido"
-    API-->>BFF: "Sesion emitida (Set-Cookie HttpOnly o token BFF)"
+    API-->>BFF: "Set-Cookie HttpOnly (eclipsec_session) + eclipsec_csrf"
     BFF-->>Browser: "Set-Cookie HttpOnly, Secure, SameSite=Lax (sin token en body)"
-    Browser->>BFF: "GET /api/challenges (solo cookie HttpOnly automatica)"
-    BFF->>API: "GET /api/v1/challenges (sesion autenticada en servidor)"
-    API-->>BFF: "Lista de retos (sin flags)"
-    BFF-->>Browser: "JSON de retos seguro"
+    Browser->>BFF: "POST /api/challenges/submit (cookie + X-CSRF-Token)"
+    BFF->>API: "POST /api/v1/challenges/slug/submit"
+    API-->>BFF: "FlagSubmissionResponse"
+    BFF-->>Browser: "JSON de respuesta seguro"
 ```
 
 ### Flujo B: Ciclo de Vida de Retos Locales con `eclipsecCLI`
@@ -201,7 +207,7 @@ sequenceDiagram
 1. `POST /api/v1/challenges/{slug}/submit` recupera el reto activo por `id` o `slug`.
 2. Consulta `solves` para verificar si el jugador ya resolvio ese reto; si existe, retorna exito idempotente con `points_awarded = 0`.
 3. Compara la flag enviada mediante `hmac.compare_digest` (tiempo constante) para mitigar ataques de canal lateral por temporizacion.
-4. Registra el intento en `submissions` (en Fase 3 se sustituira el almacenamiento en claro por hash/longitud para evitar fuga de intentos cercanos).
+4. Registra el intento en `submissions` almacenando su resumen `HMAC-SHA256` (nunca texto plano).
 5. Si es correcta, crea el registro en `solves`, incrementa `challenges.solves_count` y `users.score` de forma atomica dentro de la misma transaccion.
 
 ---
@@ -211,7 +217,7 @@ sequenceDiagram
 | ID | Decision | Estado | Justificacion |
 |---|---|---|---|
 | **ADR-001** | Modelo hibrido de retos: web alojados (`target_url`) + locales descargables via CLI (`repository`, `path`) | Vigente | Permite ejecutar retos pesados o sensibles en el Docker local del participante sin consumir CPU/memoria del servidor API en Railway. |
-| **ADR-002** | Autenticacion web sin tokens en navegador (BFF + cookies `HttpOnly`) separada de tokens CLI | Planificada (Fase 3) | Evita exponer JWTs en el inspector de red del navegador o en `localStorage`, reduciendo drasticamente el riesgo ante XSS. |
+| **ADR-002** | Autenticacion web sin tokens en navegador (cookies `HttpOnly` + CSRF + BFF) separada de tokens CLI | Vigente (Fase 3) | Evita exponer JWTs en el inspector de red del navegador o en `localStorage`, mitigando robo de sesion por XSS y soportando revocacion via `revoked_tokens`. |
 | **ADR-003** | Adopcion de Alembic y seeding idempotente | Planificada (Fase 4) | Reemplaza parches DDL manuales en `database.py` y asegura que nuevos retos agregados a `seed.py` se apliquen sobre bases existentes. |
 | **ADR-004** | Aislamiento estricto por contenedor en lugar de monolito compartido con `ttyd` root | Planificada (Fase 5) | Evita movimiento lateral entre retos en el mismo contenedor y protege las flags y codigos fuente de otros desafios. |
 | **ADR-005** | Retiro gradual de `POST /api/ctf-academy` tras paridad con `/api/v1/*` | Planificada (Fase 4-6) | Elimina la duplicacion de reglas de ranking, registro y sesion mantenidas por compatibilidad historica. |

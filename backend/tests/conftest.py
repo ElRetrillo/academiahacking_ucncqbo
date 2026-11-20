@@ -1,17 +1,33 @@
+import sys
+from pathlib import Path
+
+BACKEND_DIR = Path(__file__).resolve().parent.parent
+if str(BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(BACKEND_DIR))
+
 import pytest
 import pytest_asyncio
-from httpx import AsyncClient, ASGITransport
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+from httpx import ASGITransport, AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
 from app.database import Base, get_db
 from app.main import app
-from app.models.user import User
 from app.models.challenge import Challenge
-from app.services.security import hash_password, hash_flag, create_access_token
+from app.models.user import User
+from app.services.rate_limiter import rate_limiter
+from app.services.security import REDACTED_FLAG_MARKER, create_access_token, hash_flag, hash_password
 
 TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
 
 engine_test = create_async_engine(TEST_DATABASE_URL, connect_args={"check_same_thread": False})
 TestingSessionLocal = async_sessionmaker(bind=engine_test, class_=AsyncSession, expire_on_commit=False)
+
+
+@pytest.fixture(autouse=True)
+def reset_rate_limiter_state():
+    rate_limiter.reset()
+    yield
+    rate_limiter.reset()
 
 
 @pytest_asyncio.fixture(scope="function")
@@ -91,7 +107,7 @@ async def sample_challenge(db_session: AsyncSession):
         category="web",
         difficulty="EASY",
         points=100,
-        flag="EclipSec{sample_flag_test}",
+        flag=REDACTED_FLAG_MARKER,
         flag_hash=hash_flag("EclipSec{sample_flag_test}"),
         target_url="/web-sample/",
         is_active=True,
@@ -105,7 +121,6 @@ async def sample_challenge(db_session: AsyncSession):
 
 @pytest_asyncio.fixture(scope="function")
 async def local_challenge(db_session: AsyncSession):
-    """A downloadable local challenge with repository/path metadata."""
     ch = Challenge(
         slug="web-sqli-001",
         title="Login Bypass",
@@ -116,7 +131,7 @@ async def local_challenge(db_session: AsyncSession):
         version="1.0",
         repository="ElRetrillo/retos_ctf",
         path="web/sqli-001",
-        flag="EclipSec{l0g1n_byp4ss_sqli_success_9f81a7}",
+        flag=REDACTED_FLAG_MARKER,
         flag_hash=hash_flag("EclipSec{l0g1n_byp4ss_sqli_success_9f81a7}"),
         target_url=None,
         is_active=True,

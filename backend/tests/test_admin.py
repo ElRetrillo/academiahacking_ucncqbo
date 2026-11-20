@@ -1,6 +1,5 @@
 import pytest
 from httpx import AsyncClient
-from app.models.challenge import Challenge
 from app.models.user import User
 
 
@@ -21,21 +20,19 @@ async def test_admin_create_and_update_challenge(client: AsyncClient, admin_toke
         "hints": "Look for gets() function.",
     }
 
-    # 1. Regular user trying to create challenge -> 403 Forbidden
     forbidden_resp = await client.post("/api/v1/admin/challenges", json=payload, headers=user_headers)
     assert forbidden_resp.status_code == 403
 
-    # 2. Admin creating challenge -> 201 Created
     create_resp = await client.post("/api/v1/admin/challenges", json=payload, headers=admin_headers)
     assert create_resp.status_code == 201
     created_data = create_resp.json()
     assert created_data["slug"] == "pwn-001"
     assert created_data["points"] == 500
     assert created_data["difficulty"] == "HARD"
-    assert created_data["flag"] == "EclipSec{b0f_1ntr0_pwn3d}"
+    assert created_data["flag"] == "[REDACTED]"
+    assert created_data["flag_configured"] is True
     challenge_id = created_data["id"]
 
-    # 3. Update points and difficulty
     update_payload = {
         "difficulty": "INSANE",
         "points": 650,
@@ -44,19 +41,18 @@ async def test_admin_create_and_update_challenge(client: AsyncClient, admin_toke
     assert update_resp.status_code == 200
     assert update_resp.json()["difficulty"] == "INSANE"
     assert update_resp.json()["points"] == 650
+    assert update_resp.json()["flag"] == "[REDACTED]"
 
 
 @pytest.mark.asyncio
 async def test_admin_list_and_update_users(client: AsyncClient, admin_token: str, regular_user: User):
     admin_headers = {"Authorization": f"Bearer {admin_token}"}
 
-    # List users
     users_resp = await client.get("/api/v1/admin/users", headers=admin_headers)
     assert users_resp.status_code == 200
     users_list = users_resp.json()
     assert len(users_list) >= 2
 
-    # Promote regular user or adjust score
     mod_payload = {
         "score": 1000,
         "nationality": "UY",
