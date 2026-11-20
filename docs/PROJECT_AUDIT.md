@@ -26,8 +26,8 @@ El portal web frontend (`eclipsec.cl` en Vercel), el cliente CLI (`eclipsecCLI`)
 | Routers API (`backend/app/api/v1/`) | 6 routers (`auth.py`, `challenges.py`, `leaderboard.py`, `users.py`, `admin.py`, `ctf_academy.py`) | Operativo, mezcla de contratos REST v1 y RPC legacy |
 | Pruebas (`backend/tests/`) | 6 suites (`test_auth.py`, `test_challenges.py`, `test_instances.py`, `test_leaderboard.py`, `test_users.py`, `test_admin.py`) | Cobertura parcial sobre `/api/v1/*`; 0 pruebas para `/api/ctf-academy`, `/health` y migraciones |
 | Retos sembrados (`backend/seed.py`) | 12 retos (`web-001`..`web-011` + `web-sqli-001`) | Flags hardcodeadas en codigo fuente |
-| Contenedores individuales (`docker/challenge-web-*`) | 11 carpetas (`001` a `011`) | Dockerfiles `002` a `011` reparados en Fase 2 |
-| Contenedor monolitico (`docker/monolithic/`) | `Dockerfile`, `start.sh`, `web-001`..`web-011` | Riesgo critico de aislamiento por `ttyd` compartido como `root` (Fase 5) |
+| Contenedores individuales (`docker/challenge-web-*`) | 11 carpetas (`001` a `011`) | Dockerfiles reparados, `ttyd` removido, usuario no-root `ctf` y flags por `ARG` |
+| Contenedor monolitico (`docker/monolithic/`) | `Dockerfile`, `start.sh`, `web-001`..`web-011` | Aislado por UID (`web002`..`web011`), sin `ttyd` ni `ENV FLAG=` global |
 | Metadatos locales en Git | `.atl/` | Eliminado de Git e ignorado en `.gitignore` (Fase 2) |
 
 ### Estado de Ejecucion de Pruebas
@@ -40,11 +40,10 @@ Durante esta auditoria la revision fue estatica sobre el codigo fuente. En el en
 
 ### Severidad Critica
 
-#### SEC-01: Ausencia de aislamiento entre retos en el contenedor monolitico
-- **Ubicacion:** [docker/monolithic/Dockerfile](../docker/monolithic/Dockerfile), [docker/monolithic/start.sh](../docker/monolithic/start.sh)
-- **Descripcion:** Los 11 servicios web y las 11 instancias de terminal web (`ttyd --port 768X --writable --cwd /root ... bash`) se ejecutan bajo el usuario `root` dentro de un unico sistema de archivos y espacio de procesos. Ademas, `Dockerfile` define `ENV FLAG='EclipSec{...}'` en el entorno global y almacena `/flag.txt`, `/app/web-005/flag.txt` y `/flag_web011.txt` legibles por todo proceso.
-- **Impacto:** Cualquier usuario que acceda a una terminal `ttyd` (`/web-00X/ws/`) o explote ejecucion de comandos (`web-004`, `web-011`), LFI (`web-005`) o SSTI (`web-008`) puede leer las variables de entorno, el codigo fuente en `/app/web-*` y las flags de los 11 retos simultaneamente, o alterar los procesos de otros participantes.
-- **Remediacion:** Eliminar las instancias `ttyd` con shell `root` compartida en nodos publicos, separar cada reto en su propio contenedor no privilegiado (`USER ctf`) o migrar la ejecucion interactiva al modelo local con `eclipsecCLI`.
+#### SEC-01: [MITIGADO PARCIALMENTE] Aislamiento entre retos en contenedores CTF
+- **Ubicacion:** [docker/monolithic/Dockerfile](../docker/monolithic/Dockerfile), [docker/monolithic/start.sh](../docker/monolithic/start.sh), [docker/challenge-web-001/Dockerfile](../docker/challenge-web-001/Dockerfile)
+- **Estado actual:** Se elimino `ttyd` y la shell `root` de todos los contenedores victima, se elimino `ENV FLAG=` global, se asignaron UIDs dedicados (`web002`..`web011` en monolitico y `ctf` en standalone) con permisos `0550`/`0440` (`0700` en `web-006` para SQLite), se retiro `/app/web-005/flag.txt` para forzar path traversal en LFI y se parametrizaron las flags mediante `ARG`.
+- **Pendiente (Fase 5):** Separar completamente cada reto en contenedores independientes con limites de recursos (`mem_limit`, `cpus`, `pids_limit`) y rootfs de solo lectura donde aplique, mas estandar UI/HTML.
 
 #### SEC-02: Flags en texto plano dentro del repositorio Git y la base de datos
 - **Ubicacion:** [backend/seed.py](../backend/seed.py), [backend/app/models/challenge.py](../backend/app/models/challenge.py#L28-L29), [backend/app/services/security.py](../backend/app/services/security.py#L22-L40), [docker/create_challenges.py](../docker/create_challenges.py)
@@ -53,13 +52,13 @@ Durante esta auditoria la revision fue estatica sobre el codigo fuente. En el en
 - **Remediacion:** Externalizar las flags de produccion a secretos/variables seguras fuera de Git, almacenar verificadores con `HMAC-SHA256` usando una clave secreta de servidor (`FLAG_HMAC_SECRET`) o hashing con sal, y retirar la columna en texto plano tras la migracion.
 
 #### SEC-03: Secretos inseguros por defecto sin validacion fail-fast en produccion
-- **Ubicacion:** [backend/app/config.py](../backend/app/config.py#L16), [backend/app/config.py](../backend/app/config.py#L44)
+- **Ubicacion:** [backend/app/config.py](../backend/app/config.py#L17), [backend/app/config.py](../backend/app/config.py#L35)
 - **Descripcion:** `JWT_SECRET` tiene un valor literal predecible (`"change-this-in-production-super-secret-ctf-key-2026"`) y `ADMIN_PASSWORD` usa `"admin123456"`. No existe validacion en el arranque que impida iniciar con `ENVIRONMENT == "production"` cuando estos valores no han sido sobrescritos.
 - **Impacto:** Un despliegue con variables de entorno incompletas permite falsificar tokens JWT de cualquier usuario o administrador.
 - **Remediacion:** Agregar un validador en `Settings` que aborte el inicio de la aplicacion si `ENVIRONMENT == "production"` y `JWT_SECRET` mantiene el valor de desarrollo o tiene longitud inferior a 32 bytes.
 
 #### SEC-04: Escalacion de privilegios por auto-asignacion del primer administrador
-- **Ubicacion:** [backend/app/services/auth_service.py](../backend/app/services/auth_service.py#L33-L37), [backend/seed.py](../backend/seed.py#L166-L186)
+- **Ubicacion:** [backend/app/services/auth_service.py](../backend/app/services/auth_service.py#L33-L37), [backend/seed.py](../backend/seed.py#L173-L193)
 - **Descripcion:** El bloque de creacion del administrador en `seed.py` esta comentado. En su lugar, `AuthService.register_user` consulta el conteo de filas en `users` y asigna `role = "admin"` al primer usuario que se registre (incluso mediante el endpoint publico `POST /api/ctf-academy` con `action: "register"`). Esta comprobacion carece de bloqueo transaccional, presentando condicion de carrera.
 - **Impacto:** En cualquier despliegue nuevo o tras un reinicio de base de datos, el primer atacante externo que llame al registro obtiene privilegios totales de administracion.
 - **Remediacion:** Eliminar la promocion automatica en el registro publico y aprovisionar el administrador inicial exclusivamente mediante comando administrativo idempotente o variable de entorno controlada.
@@ -75,7 +74,7 @@ Durante esta auditoria la revision fue estatica sobre el codigo fuente. En el en
 - **Remediacion:** Adoptar el patron **BFF (Backend for Frontend)** en Next.js o cookies emitidas por servidor con `HttpOnly; Secure; SameSite=Lax; Path=/`, rotacion/lista de revocacion por `jti`, expiracion corta de sesion web y tokens separados de alcance acotado exclusivamente para `eclipsecCLI`.
 
 #### SEC-06: Configuracion CORS excesivamente permisiva con `allow_credentials=True`
-- **Ubicacion:** [backend/app/main.py](../backend/app/main.py#L48-L55), [backend/app/config.py](../backend/app/config.py#L29)
+- **Ubicacion:** [backend/app/main.py](../backend/app/main.py#L51-L58), [backend/app/config.py](../backend/app/config.py#L28)
 - **Descripcion:** El middleware CORS habilita `allow_credentials=True`, `allow_methods=["*"]`, `allow_headers=["*"]` y la expresion regular `^https:\/\/.*\.vercel\.app$`.
 - **Impacto:** Cualquier aplicacion alojada en cualquier subdominio de Vercel perteneciente a un tercero puede realizar peticiones autenticadas cross-origin contra la API.
 - **Remediacion:** Restringir `CORS_ORIGINS` a dominios exactos controlados por EclipSec, limitar `CORS_ORIGIN_REGEX` a prefijos de proyecto propios y especificar listas explicitas de metodos y cabeceras permitidas.
@@ -119,17 +118,17 @@ Durante esta auditoria la revision fue estatica sobre el codigo fuente. En el en
 
 1. **[RESUELTO en Fase 2] Dockerfiles individuales rotos (`docker/challenge-web-002` a `challenge-web-011`)**: Eliminada la barra invertida suelta `\` de la linea 1 y corregido el escape de `$host`, `$remote_addr` y `$http_upgrade` en Nginx en los 10 Dockerfiles y en [docker/create_challenges.py](../docker/create_challenges.py).
 2. **[RESUELTO en Fase 2] Desincronizacion entre retos standalone y monolitico**:
-   - `web-009` unificado a `/index.bak` en [docker/challenge-web-009/app.py](../docker/challenge-web-009/app.py#L13) y [docker/monolithic/web-009/app.py](../docker/monolithic/web-009/app.py#L13).
+   - `web-009` unificado a `/index.bak` en [docker/challenge-web-009/app.py](../docker/challenge-web-009/app.py#L24) y [docker/monolithic/web-009/app.py](../docker/monolithic/web-009/app.py#L24).
    - `web-011` y `web-004` aprovisionan sus flags en build-time en `/app/web-011/flag.txt` y `/app/web-004/flag.txt` (monolitico) y `/app/flag.txt` (standalone), con pistas actualizadas en [backend/seed.py](../backend/seed.py) para evitar colision con `web-005` en `/flag.txt`.
 3. **[RESUELTO en Fase 2] Configuracion de red incompleta en `docker/docker-compose.yml`**: Agregada `networks: [ctf-net]` a `web-001`, eliminado el bloque comentado muerto `misc-001` y hecha idempotente la generacion desde `docker/create_challenges.py`.
 4. **[RESUELTO en Fase 2] Rutas locales hardcodeadas y artefactos personales en Git**: Reemplazadas rutas absolutas de desarrollador por `Path(__file__).resolve().parent` en [docker/build_monolithic.py](../docker/build_monolithic.py) y [docker/create_challenges.py](../docker/create_challenges.py), y eliminada `.atl/` del seguimiento Git e ignorada en `.gitignore`.
 5. **Inconsistencia y complejidad `O(N)` en calculo de ranking**: [backend/app/services/user_service.py](../backend/app/services/user_service.py#L58-L70) y [backend/app/api/v1/ctf_academy.py](../backend/app/api/v1/ctf_academy.py#L128-L140) calculan el ranking cargando todos los `User.id` en Python y ordenando por `User.created_at.asc()`, lo cual diverge de [backend/app/services/leaderboard_service.py](../backend/app/services/leaderboard_service.py#L38-L42) que desempata por `last_solve_at.asc().nulls_last()`.
-6. **Seeding no incremental y migraciones manuales sin Alembic**: [backend/app/main.py](../backend/app/main.py#L19-L27) solo ejecuta `seed()` cuando la tabla `challenges` tiene 0 registros; cualquier base ya desplegada no recibe nuevos retos agregados a `CHALLENGES_DATA` (como `web-sqli-001`). [backend/app/database.py](../backend/app/database.py#L46-L75) ejecuta `ALTER TABLE` manual en codigo de aplicacion sin versionado de esquema (Alembic).
+6. **Seeding no incremental y migraciones manuales sin Alembic**: [backend/app/main.py](../backend/app/main.py#L19-L30) solo ejecuta `seed()` cuando la tabla `challenges` tiene 0 registros; cualquier base ya desplegada no recibe nuevos retos agregados a `CHALLENGES_DATA` (como `web-sqli-001`). [backend/app/database.py](../backend/app/database.py#L46-L75) ejecuta `ALTER TABLE` manual en codigo de aplicacion sin versionado de esquema (Alembic).
 7. **Violaciones de Clean Code y SOLID**:
    - Routers con logica de acceso a datos acoplada a SQLAlchemy (`admin.py`, `ctf_academy.py`).
    - Schemas con campos duplicados (`snake_case` y `camelCase` simultaneos en `UserProfileDetail` y `RecentSolveDetail` en `backend/app/schemas/user.py`).
    - Dependencia sin uso en `backend/requirements.txt` (`passlib[bcrypt]`), imports muertos (`OAuth2PasswordBearer` en `deps.py`, `update`/`delete` en `challenge_service.py`, `datetime`/`nulls_last` en `leaderboard_service.py`) y ~90 lineas de codigo comentado en `backend/seed.py`.
-   - **[RESUELTO en Fase 2]** Alineados [railway.toml](../railway.toml) y [backend/railway.json](../backend/railway.json) (`restartPolicyMaxRetries = 10`, `healthcheckPath = "/health"`, `healthcheckTimeout = 100`) y completado `backend/.env.example`.
+   - **[RESUELTO en Fase 2]** Alineados [railway.toml](../railway.toml) y [backend/railway.json](../backend/railway.json) (`restartPolicyMaxRetries = 10`, `healthcheckPath = "/health"`, `healthcheckTimeout = 100`), completado `backend/.env.example` con credenciales 100% ficticias, corregidos `web-010` (`X-Forwarded-For` multicapa) y `web-006` (SQLite con `Path` + `closing()`), y garantizada la portabilidad multi-SO (`.gitattributes` LF, `BACKEND_DIR` con `Path` y `.as_posix()` en `config.py`, `main.py` y `seed.py`).
 8. **Deuda en interfaces HTML de retos (`docker/`)**: Estilos inline duplicados (`style="background:#1a1a2e;..."`), ausencia de `global.css` con tokens 60-30-10 y HTML sin estructura semantica ni `<meta name="robots" content="noindex, nofollow">`.
 
 ---
@@ -141,8 +140,8 @@ Siguiendo la regla de no avanzar a la siguiente tarea sin finalizar y verificar 
 | Fase | Objetivo Principal | Entregables y Criterios de Cierre |
 |---|---|---|
 | **Fase 1 (Completada)** | Auditoria, rama nueva y documentacion | Rama `feat/ctf-standards-and-docs` creada; suite `docs/*.md`, `README.md` y `backend/README.md` validados sin emojis ni flags expuestas. |
-| **Fase 2 (Completada)** | Higiene del repositorio e infraestructura Docker | Retiro de `.atl/` del tracking; rutas relativas en `docker/*.py`; reparacion de Dockerfiles `web-002..011`; sincronizacion `web-009`/`web-004`/`web-011`; red `ctf-net` en `web-001`; unificacion de configuracion Railway y `.env.example`. |
+| **Fase 2 (Completada)** | Higiene, Docker anti-bypass y portabilidad | Retiro de `.atl/`; `.gitattributes` LF y rutas portables multi-SO en `backend/`; remocion de `ttyd`, aislamiento por UID, correccion `web-005`/`006`/`008`/`010`, flags por `ARG`, alineacion Railway y `.env.example` ficticio. |
 | **Fase 3 (Siguiente)** | Endurecimiento DevSecOps del Backend | Validacion fail-fast de `JWT_SECRET` en produccion; eliminacion de auto-admin en registro; sesion segura via BFF/cookies `HttpOnly` + CSRF (cero tokens expuestos en navegador); CORS estricto; rate limiting; eliminacion de PII en perfil publico; `HMAC-SHA256` y externalizacion de flags; `backend/Dockerfile` non-root multi-stage con `$PORT`. |
 | **Fase 4** | Refactorizacion Clean Code, SOLID y Pruebas | Capa Repository + inyeccion de dependencias; unificacion de ranking en SQL; migracion a Alembic y seed idempotente; throttling de `last_connected_at`; limpieza de codigo muerto y campos duales; cobertura de tests incluyendo `/api/ctf-academy`, `/health` y migraciones; `ruff` + `mypy` + `pytest` en verde. |
-| **Fase 5** | Aislamiento de sandboxes CTF y estandar UI/HTML | Retiro de `ttyd` root compartido; contenedores aislados no privilegiados; `global.css` 60-30-10 y HTML semantico con `noindex` en las interfaces web de retos sin comprometer la vulnerabilidad intencional de cada ejercicio. |
+| **Fase 5** | Contenedores dedicados con limites y estandar UI/HTML | Limites de recursos (`mem_limit`, `cpus`, `pids_limit`) y rootfs read-only; `global.css` 60-30-10 y HTML semantico con `noindex` en las interfaces web de retos sin comprometer la vulnerabilidad intencional de cada ejercicio. |
 | **Fase 6** | Integracion integral Frontend (`eclipsec.cl`) y CLI | Verificacion extremo a extremo con frontend Next.js (BFF sin tokens en navegador, componentes genericos, skeletons, SEO, tipografia) y `eclipsecCLI`. |

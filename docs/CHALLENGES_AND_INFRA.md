@@ -29,18 +29,19 @@ Por seguridad, ninguna flag real se transcribe en la documentacion (ver politica
 
 ### 2.1 Docker Compose (Entorno Local o VPS Dedicado)
 
-Definido en [docker/docker-compose.yml](../docker/docker-compose.yml). Levanta cada reto `web-001` a `web-011` en contenedores separados mapeando puertos dedicados:
+Definido en [docker/docker-compose.yml](../docker/docker-compose.yml). Levanta cada reto `web-001` a `web-011` en contenedores separados sin privilegios (`ctf`), sin terminales interactivas dentro de los objetivos y parametrizando las flags mediante build-args (`FLAG_WEB_001` a `FLAG_WEB_011`):
 
 - Aplicaciones Web: `8001` a `8011` (internamente puerto `80` tras Nginx + Flask).
-- Terminales WebSocket (`ttyd`): `7681` a `7691`.
+- Si se requiere consola web para estudiantes, debe desplegarse en un contenedor atacante aislado aparte, nunca dentro de los contenedores victima.
 
 ### 2.2 Contenedor Monolitico con Nginx (Railway PaaS)
 
-Definido en [docker/monolithic/](../docker/monolithic/Dockerfile). Dado que Railway expone un unico dominio por servicio en puertos `80`/`443`, este nodo enruta mediante Nginx bajo subrutas `/web-001/` a `/web-011/` y `/web-001/ws/` a `/web-011/ws/`.
+Definido en [docker/monolithic/](../docker/monolithic/Dockerfile). Dado que Railway expone un unico dominio por servicio en puertos `80`/`443`, este nodo enruta mediante Nginx bajo subrutas `/web-001/` a `/web-011/`.
 
-**Advertencia de Seguridad y Estado Actual:**
-- Este esquema no provee aislamiento entre retos ni entre jugadores: todas las terminales `ttyd` se ejecutan con shell `root` en el mismo contenedor (hallazgo `SEC-01`).
-- Solo debe utilizarse en laboratorios controlados de desarrollo mientras se completa la Fase 5, priorizando para produccion el modelo de contenedores aislados por reto o la ejecucion local via `eclipsecCLI`.
+**Aislamiento y Configuracion Actual:**
+- Cada servicio Flask se ejecuta bajo un usuario dedicado sin privilegios (`web002` a `web011`), sin `ttyd`, sin `ENV FLAG=` global y con permisos `0550`/`0440` (`0700` en `web-006` para SQLite) para impedir movimiento lateral o lectura de flags de otros retos.
+- Las flags se inyectan en build-time via `ARG FLAG_WEB_001`..`ARG FLAG_WEB_011`, manteniendo los valores por defecto solo para desarrollo local y permitiendo sobrescribirlos en despliegue real.
+- Para maxima resiliencia y limites de recursos independientes (Fase 5), se recomienda igualmente optar por contenedores separados o ejecucion local via `eclipsecCLI` en competencias con alta concurrencia.
 
 ### 2.3 Retos Locales mediante `eclipsecCLI`
 

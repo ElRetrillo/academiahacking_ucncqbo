@@ -77,21 +77,26 @@ Queda estrictamente prohibido en el portal web:
 4. Toda mutacion via cookie debe validar proteccion CSRF (`SameSite=Lax` + verificacion de cabecera `Origin`/`Referer` o token double-submit).
 5. **Excepcion acotada para `eclipsecCLI`**: El CLI de terminal no es un navegador; debe usar un flujo separado de token de CLI con alcance restringido (solo lectura de retos e instancias/envio de flags), expiracion acotada y almacenamiento en el almacen de credenciales del sistema operativo.
 
-### 4.2 Gestion de Secretos y Flags CTF
+### 4.2 Gestion de Secretos, `.env.example` y Flags CTF
 
 - Ningun secreto (`JWT_SECRET`, `ADMIN_PASSWORD`, `FLAG_HMAC_SECRET`, credenciales de BD) ni ninguna flag real de competencia debe vivir en el historial de Git ni como valor por defecto usable en produccion.
+- Los archivos plantilla como `.env.example` deben usar exclusivamente valores 100% ficticios (`example.test`, `example.local`, `example-org/example-ctf-challenges`, `ENVIRONMENT="development"`), sin parecerse a dominios, repositorios, usuarios ni credenciales reales.
 - La aplicacion debe fallar de inmediato al arrancar (`fail-fast`) si `ENVIRONMENT == "production"` y faltan secretos obligatorios o tienen entropia insuficiente (< 32 caracteres).
 - Las flags deben verificarse en tiempo constante (`hmac.compare_digest`) contra un resumen criptografico con clave (`HMAC-SHA256`), nunca almacenarse en texto plano en `challenges` ni en `submissions`.
 
-### 4.3 Hardening de API y Contenedores
+### 4.3 Hardening de API, Contenedores y Portabilidad Multi-SO
 
 - **RBAC explicito**: Prohibida la asignacion automatica del rol `admin` en el registro publico.
 - **CORS estricto**: Prohibido usar wildcards amplios como `https://*.vercel.app` junto con `allow_credentials=True`. Listar origenes exactos y metodos/cabeceras minimos necesarios.
 - **Rate Limiting**: Aplicar limites de tasa diferenciados para autenticacion, registro y envio de flags.
 - **Privacidad y Minimizar PII**: Ningun endpoint publico puede exponer `email`, estado interno `is_active` ni roles de otros usuarios.
-- **Frontera Pedagogica en Contenedores CTF**:
-  - Cada reto vulnerable intencional (SQLi, LFI, SSTI, CMDi) debe aislarse en un contenedor propio bajo usuario sin privilegios (`USER ctf`), con sistema de archivos raiz de solo lectura donde sea posible y limites de recursos (`mem_limit`, `cpus`, `pids_limit`).
-  - La vulnerabilidad debe permitir leer exclusivamente la flag de *ese* reto especifico, nunca exponer secretos del host, tokens de la plataforma ni flags de otros retos.
+- **Frontera Pedagogica e Invariante Anti-Bypass en Contenedores CTF**:
+  - Cada reto vulnerable intencional (SQLi, LFI, SSTI, CMDi) debe aislarse bajo usuario sin privilegios (`ctf` en standalone; `web002`..`web011` en monolitico) con permisos restrictivos (`0550`/`0440` o `0700`/`0440`) y limites de recursos (`mem_limit`, `cpus`, `pids_limit`).
+  - Prohibido incluir terminales interactivas (`ttyd` / shells) dentro de los contenedores victima o variables `ENV FLAG=` globales que permitan leer flags sin completar la vulnerabilidad del reto.
+  - La vulnerabilidad debe permitir leer exclusivamente la flag de *ese* reto especifico tras explotar el vector intencional (ej. path traversal real en LFI, sin atajos en el directorio de trabajo).
+- **Portabilidad Multi-SO (Windows, Linux, macOS)**:
+  - Toda ruta de archivo en backend y generadores debe construirse con `pathlib.Path(__file__).resolve()` y normalizarse con `.as_posix()` en URIs SQLite para no depender del directorio de trabajo (`CWD`) ni de separadores especificos del sistema operativo.
+  - `.gitattributes` debe forzar saltos de linea `eol=lf` en scripts `.sh`, Dockerfiles, Python, YAML, TOML y JSON para evitar fallos al construir o arrancar contenedores Linux desde estaciones Windows.
 
 ---
 

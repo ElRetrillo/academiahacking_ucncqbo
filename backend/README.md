@@ -70,6 +70,13 @@ uvicorn app.main:app --reload --port 8000
 
 Documentacion interactiva disponible en `http://localhost:8000/docs`.
 
+El backend resuelve automaticamente sus rutas de `.env`, `ctf.db` y `seed.py` con `pathlib.Path`, por lo que tambien funciona ejecutandolo desde la raiz del repositorio en Windows, Linux o macOS:
+
+```bash
+uvicorn app.main:app --app-dir backend --reload --port 8000
+python backend/seed.py
+```
+
 ---
 
 ## Pruebas Automatizadas
@@ -85,16 +92,16 @@ pytest -v
 
 ## Variables de Entorno Clave
 
-Ademas de las definidas en `.env.example`, la configuracion en `app/config.py` soporta:
+Ademas de las definidas en `.env.example` (que usa valores 100% ficticios), la configuracion en `app/config.py` soporta:
 
 ```env
-ENVIRONMENT=production
-DATABASE_URL=postgresql+asyncpg://user:password@host:5432/dbname
-JWT_SECRET=<cadena-aleatoria-segura-minimo-32-caracteres>
-CORS_ORIGINS=https://eclipsec.cl,https://www.eclipsec.cl
+ENVIRONMENT=development
+DATABASE_URL=postgresql+asyncpg://example_user:example_pass@db.example.local:5432/ctf_example
+JWT_SECRET=example_jwt_secret_replace_with_32_plus_random_chars
+CORS_ORIGINS=http://localhost:3000,https://portal.example.test
 CORS_ORIGIN_REGEX=
-CHALLENGES_BASE_URL=https://retos.eclipsec.cl
-CHALLENGES_REPOSITORY=ElRetrillo/retos_ctf
+CHALLENGES_BASE_URL=https://challenges.example.test
+CHALLENGES_REPOSITORY=example-org/example-ctf-challenges
 ```
 
 Nota de seguridad: Nunca reutilizar `JWT_SECRET` ni credenciales de ejemplo de desarrollo en despliegues publicos. Consulta [Estandares DevSecOps](../docs/STANDARDS.md) para el patron de integracion BFF sin exposicion de tokens en navegador.
