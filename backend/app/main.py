@@ -1,12 +1,17 @@
+import logging
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import select
 
-from app.config import settings
+from fastapi import Depends, FastAPI, Request, status
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.api.v1 import api_v1_router, ctf_academy_router
-from app.database import AsyncSessionLocal, init_db
-from app.models.challenge import Challenge
+from app.config import settings
+from app.database import AsyncSessionLocal, get_db, init_db
+
+logger = logging.getLogger(__name__)
 
 _SENSITIVE_NO_STORE_PREFIXES = (
     "/api/v1/auth/",
@@ -19,21 +24,23 @@ _SENSITIVE_NO_STORE_PREFIXES = (
 async def lifespan(app: FastAPI):
     await init_db()
 
-    try:
-        async with AsyncSessionLocal() as db:
-            result = await db.execute(select(Challenge).limit(1))
-            has_challenges = result.first() is not None
-
-        if not has_challenges:
+    if settings.AUTO_SEED_ENABLED:
+        try:
             try:
-                from seed import seed
+                from seed import sync_seed_data
             except ImportError:
-                from backend.seed import seed
-            print("No challenges found in the database. Running automatic seeding...")
-            await seed()
-            print("Automatic seeding completed successfully.")
-    except Exception as e:
-        print(f"Warning: Auto-seeding check failed or was skipped: {e}")
+                from backend.seed import sync_seed_data
+
+            async with AsyncSessionLocal() as db:
+                summary = await sync_seed_data(db)
+            if summary["admin_created"] or summary["challenges_added"]:
+                logger.info(
+                    "Seed sync applied: admin_created=%s, challenges_added=%s",
+                    summary["admin_created"],
+                    summary["challenges_added"],
+                )
+        except Exception as exc:
+            logger.warning("Automatic seeding check failed or was skipped: %s", exc)
 
     yield
 
@@ -77,6 +84,18 @@ app.include_router(ctf_academy_router)
 
 
 @app.get("/")
-@app.get("/health")
-async def health():
+async def root():
     return {"status": "ok"}
+
+
+@app.get("/health")
+async def health(db: AsyncSession = Depends(get_db)):
+    try:
+        await db.execute(text("SELECT 1"))
+        return {"status": "ok", "database": "ok"}
+    except Exception as exc:
+        logger.warning("Database health check failed: %s", exc)
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content={"status": "degraded", "database": "error"},
+        )

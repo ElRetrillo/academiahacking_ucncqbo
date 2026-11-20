@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import os
 import sys
 from datetime import datetime, timezone
@@ -9,13 +10,21 @@ BACKEND_DIR = Path(__file__).resolve().parent
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database import AsyncSessionLocal, init_db
 from app.models.challenge import Challenge
 from app.models.user import User
-from app.services.security import REDACTED_FLAG_MARKER, hash_flag, hash_password
+from app.services.security import (
+    MAX_BCRYPT_PASSWORD_BYTES,
+    REDACTED_FLAG_MARKER,
+    hash_flag,
+    hash_password,
+)
+
+logger = logging.getLogger(__name__)
 
 _DEFAULT_DEV_ADMIN_PASSWORDS = ("admin123456", "CHANGE_ME", "example_")
 
@@ -188,26 +197,46 @@ def resolve_challenge_flag(slug: str, dev_default: str, file_overrides: dict[str
     return dev_default
 
 
-async def ensure_admin_user(db) -> None:
-    admin_res = await db.execute(select(User).where(User.role == "admin").limit(1))
+async def ensure_admin_user(db: AsyncSession) -> bool:
+    admin_res = await db.execute(select(User.id).where(User.role == "admin").limit(1))
     if admin_res.scalar_one_or_none():
-        return
+        return False
 
     password = settings.ADMIN_PASSWORD.strip()
+    if not password:
+        return False
+
     is_prod = settings.ENVIRONMENT.lower() == "production"
     is_weak_or_placeholder = len(password) < 12 or any(m in password for m in _DEFAULT_DEV_ADMIN_PASSWORDS)
-
     if is_prod and is_weak_or_placeholder:
-        print("Skipping admin creation: configure a strong ADMIN_PASSWORD (12+ chars) in production.")
-        return
+        logger.warning("Skipping admin creation: configure a strong ADMIN_PASSWORD (12+ chars) in production.")
+        return False
 
-    if not password:
-        return
+    if len(password.encode("utf-8")) > MAX_BCRYPT_PASSWORD_BYTES:
+        logger.warning("Skipping admin creation: ADMIN_PASSWORD exceeds %s UTF-8 bytes.", MAX_BCRYPT_PASSWORD_BYTES)
+        return False
+
+    admin_username = settings.ADMIN_USERNAME.strip()
+    admin_email = settings.ADMIN_EMAIL.strip().lower()
+
+    conflict_res = await db.execute(
+        select(User.id)
+        .where(
+            or_(
+                func.lower(User.username) == admin_username.lower(),
+                func.lower(User.email) == admin_email,
+            )
+        )
+        .limit(1)
+    )
+    if conflict_res.scalar_one_or_none():
+        logger.warning("Skipping admin creation: ADMIN_USERNAME or ADMIN_EMAIL is already in use.")
+        return False
 
     now = datetime.now(timezone.utc)
     admin = User(
-        username=settings.ADMIN_USERNAME,
-        email=settings.ADMIN_EMAIL,
+        username=admin_username,
+        email=admin_email,
         hashed_password=hash_password(password),
         role="admin",
         nationality="CL",
@@ -218,42 +247,57 @@ async def ensure_admin_user(db) -> None:
     )
     db.add(admin)
     await db.commit()
+    return True
 
 
-async def seed() -> None:
-    await init_db()
+async def sync_seed_data(db: AsyncSession) -> dict[str, int]:
     file_overrides = load_flag_overrides()
+    admin_created = await ensure_admin_user(db)
 
-    async with AsyncSessionLocal() as db:
-        await ensure_admin_user(db)
+    existing_res = await db.execute(select(Challenge.slug))
+    existing_slugs = set(existing_res.scalars().all())
 
-        for ch_data in CHALLENGES_DATA:
-            res = await db.execute(select(Challenge).where(Challenge.slug == ch_data["slug"]))
-            existing_ch = res.scalar_one_or_none()
-            if not existing_ch:
-                resolved_flag = resolve_challenge_flag(
-                    ch_data["slug"], ch_data["default_flag"], file_overrides
-                )
-                ch = Challenge(
-                    slug=ch_data["slug"],
-                    title=ch_data["title"],
-                    category=ch_data["category"],
-                    difficulty=ch_data["difficulty"],
-                    points=ch_data["points"],
-                    flag=REDACTED_FLAG_MARKER,
-                    flag_hash=hash_flag(resolved_flag),
-                    description=ch_data["description"],
-                    target_url=ch_data.get("target_url"),
-                    hints=ch_data.get("hints"),
-                    version=ch_data.get("version", "1.0"),
-                    repository=ch_data.get("repository"),
-                    path=ch_data.get("path"),
-                    is_active=True,
-                    solves_count=0,
-                    created_at=datetime.now(timezone.utc),
-                )
-                db.add(ch)
+    challenges_added = 0
+    for ch_data in CHALLENGES_DATA:
+        slug = ch_data["slug"]
+        if slug in existing_slugs:
+            continue
+
+        resolved_flag = resolve_challenge_flag(slug, ch_data["default_flag"], file_overrides)
+        ch = Challenge(
+            slug=slug,
+            title=ch_data["title"],
+            category=ch_data["category"],
+            difficulty=ch_data["difficulty"],
+            points=ch_data["points"],
+            flag=REDACTED_FLAG_MARKER,
+            flag_hash=hash_flag(resolved_flag),
+            description=ch_data["description"],
+            target_url=ch_data.get("target_url"),
+            hints=ch_data.get("hints"),
+            version=ch_data.get("version", "1.0"),
+            repository=ch_data.get("repository"),
+            path=ch_data.get("path"),
+            is_active=True,
+            solves_count=0,
+            created_at=datetime.now(timezone.utc),
+        )
+        db.add(ch)
+        challenges_added += 1
+
+    if challenges_added > 0:
         await db.commit()
+
+    return {
+        "admin_created": 1 if admin_created else 0,
+        "challenges_added": challenges_added,
+    }
+
+
+async def seed() -> dict[str, int]:
+    await init_db()
+    async with AsyncSessionLocal() as db:
+        return await sync_seed_data(db)
 
 
 if __name__ == "__main__":
