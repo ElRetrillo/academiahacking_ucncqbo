@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 DOCKER_DIR = Path(__file__).resolve().parent.parent
+SHARED_DIR = DOCKER_DIR / "shared"
 if str(DOCKER_DIR) not in sys.path:
     sys.path.insert(0, str(DOCKER_DIR))
 
@@ -61,8 +62,9 @@ def load_isolated_challenge(
     workdir.mkdir(parents=True, exist_ok=True)
 
     src_dir = DOCKER_DIR / f"challenge-web-{challenge_id}"
-    for fname in ("app.py", "ui.py", "global.css"):
-        shutil.copyfile(src_dir / fname, workdir / fname)
+    shutil.copyfile(src_dir / "app.py", workdir / "app.py")
+    shutil.copyfile(SHARED_DIR / "ui.py", workdir / "ui.py")
+    shutil.copyfile(SHARED_DIR / "global.css", workdir / "global.css")
 
     if challenge_id in {"002", "003", "006", "007", "008", "009", "010"}:
         (workdir / ".flag").write_text(f"{flag_value}\n", encoding="utf-8", newline="\n")
@@ -91,12 +93,11 @@ def load_isolated_challenge(
     app_mod = importlib.util.module_from_spec(app_spec)
     sys.modules[mod_name] = app_mod
     app_spec.loader.exec_module(app_mod)
-    return app_mod.app, workdir
+    return getattr(app_mod, "app"), workdir
 
 
-def test_generators_parity_with_checked_in_tree(tmp_path: Path):
+def test_generators_parity_with_checked_in_tree_and_no_duplicates(tmp_path: Path):
     gen_dir = tmp_path / "docker_gen"
-    shutil.copytree(DOCKER_DIR / "shared", gen_dir / "shared")
     generate_challenges(gen_dir)
     build_monolithic_bundle(gen_dir, gen_dir / "monolithic")
 
@@ -106,30 +107,26 @@ def test_generators_parity_with_checked_in_tree(tmp_path: Path):
 
     for i in range(1, 12):
         cid = f"{i:03d}"
-        gen_ch = gen_dir / f"challenge-web-{cid}"
         real_ch = DOCKER_DIR / f"challenge-web-{cid}"
-        gen_files = sorted(p.name for p in gen_ch.iterdir() if p.is_file())
-        real_files = sorted(p.name for p in real_ch.iterdir() if p.is_file())
-        assert gen_files == real_files
-        for fname in gen_files:
-            assert (gen_ch / fname).read_text(encoding="utf-8") == (real_ch / fname).read_text(
-                encoding="utf-8"
-            )
+        expected_files = ["Dockerfile", "index.html", "nginx.conf"] if cid == "001" else ["Dockerfile", "app.py"]
+        actual_files = sorted(
+            p.name for p in real_ch.iterdir() if p.is_file() and p.name != ".DS_Store"
+        )
+        assert actual_files == sorted(expected_files)
+        assert (gen_dir / f"challenge-web-{cid}" / "Dockerfile").read_text(encoding="utf-8") == (
+            real_ch / "Dockerfile"
+        ).read_text(encoding="utf-8")
 
     gen_mono = gen_dir / "monolithic"
     real_mono = DOCKER_DIR / "monolithic"
-    gen_mono_files = sorted(
-        p.relative_to(gen_mono).as_posix()
-        for p in gen_mono.rglob("*")
-        if p.is_file() and "__pycache__" not in p.parts
-    )
-    real_mono_files = sorted(
+    expected_mono_files = ["Dockerfile", "start.sh", "web-index/index.html"]
+    actual_mono_files = sorted(
         p.relative_to(real_mono).as_posix()
         for p in real_mono.rglob("*")
         if p.is_file() and "__pycache__" not in p.parts
     )
-    assert gen_mono_files == real_mono_files
-    for rel in gen_mono_files:
+    assert actual_mono_files == expected_mono_files
+    for rel in expected_mono_files:
         assert (gen_mono / rel).read_text(encoding="utf-8") == (real_mono / rel).read_text(
             encoding="utf-8"
         )
@@ -143,6 +140,7 @@ def test_dockerfiles_and_compose_hardening():
         df_text = df_bytes.decode("utf-8")
         assert "ARG CHALLENGE_FLAG=" in df_text
         assert "\nUSER " in df_text
+        assert "docker/shared/" in df_text
         assert "ttyd" not in df_text
         assert "ENV FLAG=" not in df_text
 
@@ -152,12 +150,14 @@ def test_dockerfiles_and_compose_hardening():
     assert "ttyd" not in mono_df
     assert "ENV FLAG=" not in mono_df
     assert "python:3.12-slim" in mono_df
+    assert "docker/shared/ui.py docker/shared/global.css" in mono_df
 
     compose_text = (DOCKER_DIR / "docker-compose.yml").read_text(encoding="utf-8")
     service_blocks = compose_text.split("  web-")[1:]
     assert len(service_blocks) == 11
     for block in service_blocks:
         for required_key in (
+            "context: ..",
             "read_only: true",
             "tmpfs:",
             "no-new-privileges:true",
@@ -267,8 +267,6 @@ def test_web_005_lfi_e2e(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     default_body = default_resp.get_data(as_text=True)
     assert_html_standards(default_body, forbidden_substring=flag)
     assert "Welcome to the home page." in default_body
-
-    # Confirm no flag.txt exists in challenge working directory (anti-bypass)
     assert not (tmp_path / "web-005" / "flag.txt").exists()
 
     lfi_resp = client.get("/?file=../flag_outside.txt")

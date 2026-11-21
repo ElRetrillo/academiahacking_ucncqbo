@@ -26,18 +26,20 @@ ARG FLAG_WEB_009='EclipSec{b4ckup_f1l3s_4r3_l34ks}'
 ARG FLAG_WEB_010='EclipSec{h34d3rs_c4n_b3_sp00f3d}'
 ARG FLAG_WEB_011='EclipSec{c0mm4nd_3x3cut10n_v1a_g3t}'
 
-COPY docker/monolithic/web-index /app/web-index
-COPY docker/monolithic/web-001 /app/web-001
-COPY docker/monolithic/web-002 /app/web-002
-COPY docker/monolithic/web-003 /app/web-003
-COPY docker/monolithic/web-004 /app/web-004
-COPY docker/monolithic/web-005 /app/web-005
-COPY docker/monolithic/web-006 /app/web-006
-COPY docker/monolithic/web-007 /app/web-007
-COPY docker/monolithic/web-008 /app/web-008
-COPY docker/monolithic/web-009 /app/web-009
-COPY docker/monolithic/web-010 /app/web-010
-COPY docker/monolithic/web-011 /app/web-011
+COPY docker/monolithic/web-index/index.html /app/web-index/index.html
+COPY docker/shared/global.css /app/web-index/global.css
+COPY docker/challenge-web-001/index.html /app/web-001/index.html
+COPY docker/shared/global.css /app/web-001/global.css
+COPY docker/challenge-web-002/app.py docker/shared/ui.py docker/shared/global.css /app/web-002/
+COPY docker/challenge-web-003/app.py docker/shared/ui.py docker/shared/global.css /app/web-003/
+COPY docker/challenge-web-004/app.py docker/shared/ui.py docker/shared/global.css /app/web-004/
+COPY docker/challenge-web-005/app.py docker/shared/ui.py docker/shared/global.css /app/web-005/
+COPY docker/challenge-web-006/app.py docker/shared/ui.py docker/shared/global.css /app/web-006/
+COPY docker/challenge-web-007/app.py docker/shared/ui.py docker/shared/global.css /app/web-007/
+COPY docker/challenge-web-008/app.py docker/shared/ui.py docker/shared/global.css /app/web-008/
+COPY docker/challenge-web-009/app.py docker/shared/ui.py docker/shared/global.css /app/web-009/
+COPY docker/challenge-web-010/app.py docker/shared/ui.py docker/shared/global.css /app/web-010/
+COPY docker/challenge-web-011/app.py docker/shared/ui.py docker/shared/global.css /app/web-011/
 COPY docker/monolithic/start.sh /usr/local/sbin/start.sh
 
 RUN sed -i 's/\r$//' /usr/local/sbin/start.sh && \

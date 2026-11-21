@@ -1,8 +1,8 @@
+import shutil
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent
 MONO_DIR = BASE_DIR / "monolithic"
-SHARED_DIR = BASE_DIR / "shared"
 
 CHALLENGE_TILES = [
     ("001", "Hidden in Plain Sight"),
@@ -59,30 +59,26 @@ def render_master_index() -> str:
     )
 
 
+def _prune_legacy_monolithic_copies(mono_dir: Path) -> None:
+    for i in range(1, 12):
+        legacy_dir = mono_dir / f"web-{i:03d}"
+        if legacy_dir.exists():
+            shutil.rmtree(legacy_dir)
+    legacy_index_css = mono_dir / "web-index" / "global.css"
+    if legacy_index_css.exists():
+        legacy_index_css.unlink()
+
+
 def build_monolithic_bundle(base_dir: Path, mono_dir: Path) -> None:
-    """Sync isolated challenge apps into docker/monolithic and render nginx/Dockerfile."""
+    """Render monolithic Dockerfile/start.sh/index without duplicating challenge source files."""
     mono_dir.mkdir(parents=True, exist_ok=True)
-    css_content = (base_dir / "shared" / "global.css").read_text(encoding="utf-8")
+    _prune_legacy_monolithic_copies(mono_dir)
 
     web_index_dir = mono_dir / "web-index"
     web_index_dir.mkdir(parents=True, exist_ok=True)
     (web_index_dir / "index.html").write_text(
         render_master_index(), encoding="utf-8", newline="\n"
     )
-    (web_index_dir / "global.css").write_text(css_content, encoding="utf-8", newline="\n")
-
-    web_001_src = base_dir / "challenge-web-001"
-    web_001_dir = mono_dir / "web-001"
-    web_001_dir.mkdir(parents=True, exist_ok=True)
-    (web_001_dir / "index.html").write_text(
-        (web_001_src / "index.html").read_text(encoding="utf-8"),
-        encoding="utf-8",
-        newline="\n",
-    )
-    (web_001_dir / "global.css").write_text(css_content, encoding="utf-8", newline="\n")
-    legacy_style = web_001_dir / "style.css"
-    if legacy_style.exists():
-        legacy_style.unlink()
 
     nginx_blocks = [
         """
@@ -92,22 +88,20 @@ def build_monolithic_bundle(base_dir: Path, mono_dir: Path) -> None:
     }
 """
     ]
+    copy_blocks = [
+        "COPY docker/monolithic/web-index/index.html /app/web-index/index.html",
+        "COPY docker/shared/global.css /app/web-index/global.css",
+        "COPY docker/challenge-web-001/index.html /app/web-001/index.html",
+        "COPY docker/shared/global.css /app/web-001/global.css",
+    ]
     start_cmds = []
 
     for i in range(2, 12):
         ch = f"{i:03d}"
-        src_dir = base_dir / f"challenge-web-{ch}"
-        dst_dir = mono_dir / f"web-{ch}"
-        dst_dir.mkdir(parents=True, exist_ok=True)
-
         port_web = 8000 + i
-        for filename in ("app.py", "ui.py", "global.css"):
-            (dst_dir / filename).write_text(
-                (src_dir / filename).read_text(encoding="utf-8"),
-                encoding="utf-8",
-                newline="\n",
-            )
-
+        copy_blocks.append(
+            f"COPY docker/challenge-web-{ch}/app.py docker/shared/ui.py docker/shared/global.css /app/web-{ch}/"
+        )
         nginx_blocks.append(
             f"""
     location /web-{ch}/ {{
@@ -167,7 +161,8 @@ exec nginx -g "daemon off;"
     )
     (mono_dir / "start.sh").write_text(start_sh, encoding="utf-8", newline="\n")
 
-    dockerfile = """FROM python:3.12-slim
+    copies_rendered = "\n".join(copy_blocks)
+    dockerfile = f"""FROM python:3.12-slim
 
 ENV DEBIAN_FRONTEND=noninteractive \\
     PYTHONUNBUFFERED=1 \\
@@ -180,33 +175,22 @@ RUN apt-get update && apt-get install -y --no-install-recommends \\
 RUN pip install --no-cache-dir "flask>=3.0.0" "waitress>=3.0.0"
 
 RUN for uid in 002 003 004 005 006 007 008 009 010 011; do \\
-        useradd --system --no-create-home --shell /usr/sbin/nologin "web${uid}"; \\
+        useradd --system --no-create-home --shell /usr/sbin/nologin "web${{uid}}"; \\
     done
 
-ARG FLAG_WEB_001='EclipSec{h1dd3n_1n_pl41n_s1ght}'
-ARG FLAG_WEB_002='EclipSec{r0b0ts_4r3_y0ur_fr13nd5}'
-ARG FLAG_WEB_003='EclipSec{c00k13_m0nst3r_m4n1pul4t10n}'
-ARG FLAG_WEB_004='EclipSec{p1ng_0f_d34th_cmdi}'
-ARG FLAG_WEB_005='EclipSec{l0c4l_f1l3_1nclus10n_m4st3r}'
-ARG FLAG_WEB_006='EclipSec{sql1_byp4ss_l0g1n}'
-ARG FLAG_WEB_007='EclipSec{1d0r_c4n_b3_d4ng3r0us}'
-ARG FLAG_WEB_008='EclipSec{sst1_t3mpl4t3_1nj3ct10n}'
-ARG FLAG_WEB_009='EclipSec{b4ckup_f1l3s_4r3_l34ks}'
-ARG FLAG_WEB_010='EclipSec{h34d3rs_c4n_b3_sp00f3d}'
-ARG FLAG_WEB_011='EclipSec{c0mm4nd_3x3cut10n_v1a_g3t}'
+ARG FLAG_WEB_001='EclipSec{{h1dd3n_1n_pl41n_s1ght}}'
+ARG FLAG_WEB_002='EclipSec{{r0b0ts_4r3_y0ur_fr13nd5}}'
+ARG FLAG_WEB_003='EclipSec{{c00k13_m0nst3r_m4n1pul4t10n}}'
+ARG FLAG_WEB_004='EclipSec{{p1ng_0f_d34th_cmdi}}'
+ARG FLAG_WEB_005='EclipSec{{l0c4l_f1l3_1nclus10n_m4st3r}}'
+ARG FLAG_WEB_006='EclipSec{{sql1_byp4ss_l0g1n}}'
+ARG FLAG_WEB_007='EclipSec{{1d0r_c4n_b3_d4ng3r0us}}'
+ARG FLAG_WEB_008='EclipSec{{sst1_t3mpl4t3_1nj3ct10n}}'
+ARG FLAG_WEB_009='EclipSec{{b4ckup_f1l3s_4r3_l34ks}}'
+ARG FLAG_WEB_010='EclipSec{{h34d3rs_c4n_b3_sp00f3d}}'
+ARG FLAG_WEB_011='EclipSec{{c0mm4nd_3x3cut10n_v1a_g3t}}'
 
-COPY docker/monolithic/web-index /app/web-index
-COPY docker/monolithic/web-001 /app/web-001
-COPY docker/monolithic/web-002 /app/web-002
-COPY docker/monolithic/web-003 /app/web-003
-COPY docker/monolithic/web-004 /app/web-004
-COPY docker/monolithic/web-005 /app/web-005
-COPY docker/monolithic/web-006 /app/web-006
-COPY docker/monolithic/web-007 /app/web-007
-COPY docker/monolithic/web-008 /app/web-008
-COPY docker/monolithic/web-009 /app/web-009
-COPY docker/monolithic/web-010 /app/web-010
-COPY docker/monolithic/web-011 /app/web-011
+{copies_rendered}
 COPY docker/monolithic/start.sh /usr/local/sbin/start.sh
 
 RUN sed -i 's/\\r$//' /usr/local/sbin/start.sh && \\
@@ -230,9 +214,9 @@ RUN printf '%s\\n' "$FLAG_WEB_002" > /app/web-002/.flag && \\
     printf '%s\\n' "$FLAG_WEB_010" > /app/web-010/.flag && \\
     printf '%s\\n' "$FLAG_WEB_011" > /app/web-011/flag.txt && \\
     for uid in 002 003 004 005 007 008 009 010 011; do \\
-        chown -R "root:web${uid}" "/app/web-${uid}" && \\
-        chmod 550 "/app/web-${uid}" && \\
-        chmod 440 "/app/web-${uid}/"*; \\
+        chown -R "root:web${{uid}}" "/app/web-${{uid}}" && \\
+        chmod 550 "/app/web-${{uid}}" && \\
+        chmod 440 "/app/web-${{uid}}/"*; \\
     done && \\
     chown root:web005 /flag.txt && chmod 440 /flag.txt && \\
     chown web006:web006 /app/web-006 && chmod 700 /app/web-006 && \\

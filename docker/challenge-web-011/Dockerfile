@@ -12,7 +12,7 @@ RUN useradd --system --no-create-home --shell /usr/sbin/nologin ctf
 ARG CHALLENGE_FLAG='EclipSec{c0mm4nd_3x3cut10n_v1a_g3t}'
 
 WORKDIR /app
-COPY app.py ui.py global.css /app/
+COPY docker/challenge-web-011/app.py docker/shared/ui.py docker/shared/global.css /app/
 
 RUN printf '%s\n' "$CHALLENGE_FLAG" > /app/flag.txt && \
     chown -R root:ctf /app && \

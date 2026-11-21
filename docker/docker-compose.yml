@@ -1,7 +1,8 @@
 services:
   web-001:
     build:
-      context: ./challenge-web-001
+      context: ..
+      dockerfile: docker/challenge-web-001/Dockerfile
       args:
         CHALLENGE_FLAG: ${FLAG_WEB_001:-EclipSec{h1dd3n_1n_pl41n_s1ght}}
     container_name: ctf-web-001
@@ -24,7 +25,8 @@ services:
 
   web-002:
     build:
-      context: ./challenge-web-002
+      context: ..
+      dockerfile: docker/challenge-web-002/Dockerfile
       args:
         CHALLENGE_FLAG: ${FLAG_WEB_002:-EclipSec{r0b0ts_4r3_y0ur_fr13nd5}}
     container_name: ctf-web-002
@@ -47,7 +49,8 @@ services:
 
   web-003:
     build:
-      context: ./challenge-web-003
+      context: ..
+      dockerfile: docker/challenge-web-003/Dockerfile
       args:
         CHALLENGE_FLAG: ${FLAG_WEB_003:-EclipSec{c00k13_m0nst3r_m4n1pul4t10n}}
     container_name: ctf-web-003
@@ -70,7 +73,8 @@ services:
 
   web-004:
     build:
-      context: ./challenge-web-004
+      context: ..
+      dockerfile: docker/challenge-web-004/Dockerfile
       args:
         CHALLENGE_FLAG: ${FLAG_WEB_004:-EclipSec{p1ng_0f_d34th_cmdi}}
     container_name: ctf-web-004
@@ -95,7 +99,8 @@ services:
 
   web-005:
     build:
-      context: ./challenge-web-005
+      context: ..
+      dockerfile: docker/challenge-web-005/Dockerfile
       args:
         CHALLENGE_FLAG: ${FLAG_WEB_005:-EclipSec{l0c4l_f1l3_1nclus10n_m4st3r}}
     container_name: ctf-web-005
@@ -118,7 +123,8 @@ services:
 
   web-006:
     build:
-      context: ./challenge-web-006
+      context: ..
+      dockerfile: docker/challenge-web-006/Dockerfile
       args:
         CHALLENGE_FLAG: ${FLAG_WEB_006:-EclipSec{sql1_byp4ss_l0g1n}}
     container_name: ctf-web-006
@@ -141,7 +147,8 @@ services:
 
   web-007:
     build:
-      context: ./challenge-web-007
+      context: ..
+      dockerfile: docker/challenge-web-007/Dockerfile
       args:
         CHALLENGE_FLAG: ${FLAG_WEB_007:-EclipSec{1d0r_c4n_b3_d4ng3r0us}}
     container_name: ctf-web-007
@@ -164,7 +171,8 @@ services:
 
   web-008:
     build:
-      context: ./challenge-web-008
+      context: ..
+      dockerfile: docker/challenge-web-008/Dockerfile
       args:
         CHALLENGE_FLAG: ${FLAG_WEB_008:-EclipSec{sst1_t3mpl4t3_1nj3ct10n}}
     container_name: ctf-web-008
@@ -187,7 +195,8 @@ services:
 
   web-009:
     build:
-      context: ./challenge-web-009
+      context: ..
+      dockerfile: docker/challenge-web-009/Dockerfile
       args:
         CHALLENGE_FLAG: ${FLAG_WEB_009:-EclipSec{b4ckup_f1l3s_4r3_l34ks}}
     container_name: ctf-web-009
@@ -210,7 +219,8 @@ services:
 
   web-010:
     build:
-      context: ./challenge-web-010
+      context: ..
+      dockerfile: docker/challenge-web-010/Dockerfile
       args:
         CHALLENGE_FLAG: ${FLAG_WEB_010:-EclipSec{h34d3rs_c4n_b3_sp00f3d}}
     container_name: ctf-web-010
@@ -233,7 +243,8 @@ services:
 
   web-011:
     build:
-      context: ./challenge-web-011
+      context: ..
+      dockerfile: docker/challenge-web-011/Dockerfile
       args:
         CHALLENGE_FLAG: ${FLAG_WEB_011:-EclipSec{c0mm4nd_3x3cut10n_v1a_g3t}}
     container_name: ctf-web-011

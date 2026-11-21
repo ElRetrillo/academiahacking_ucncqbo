@@ -29,16 +29,16 @@ Por seguridad, ninguna flag real se transcribe en la documentacion (ver politica
 
 ### 2.1 Docker Compose (Entorno Local o VPS Dedicado)
 
-Definido en [docker/docker-compose.yml](../docker/docker-compose.yml) y generado de forma idempotente desde [docker/create_challenges.py](../docker/create_challenges.py). Cada reto `web-001` a `web-011` se ejecuta en su propio contenedor endurecido y sin consola interactiva:
+Definido en [docker/docker-compose.yml](../docker/docker-compose.yml) y sincronizado desde el generador modular [docker/create_challenges.py](../docker/create_challenges.py) usando el contexto raiz del repositorio (`context: ..`) para evitar copias duplicadas de `docker/shared/`. Cada reto `web-001` a `web-011` se ejecuta en su propio contenedor endurecido y sin consola interactiva:
 
 - **Imagenes y servidores**: `web-001` sobre `nginx:1.27-alpine` (`USER nginx`, puerto interno `8080` mapeado a `8001`); `web-002` a `web-011` sobre `python:3.12-slim` + `waitress` (`USER ctf`, puerto interno `8000` mapeado a `8002..8011`).
 - **Aislamiento y limites de recursos**: `read_only: true`, `/tmp:rw,noexec,nosuid,size=16m` (`web-006` persiste SQLite en `/tmp/users.db` via `CTF_DB_PATH`), `security_opt: ["no-new-privileges:true"]`, `cap_drop: ["ALL"]` (`cap_add: ["NET_RAW"]` unicamente en `web-004`), `mem_limit`/`memswap_limit` (`64m` en `001`, `128m` en `002..011`), `cpus` (`0.25` / `0.50`) y `pids_limit` (`32` / `64`).
 - **Parametrizacion y anti-bypass**: Flags inyectadas en build-time mediante `FLAG_WEB_001` a `FLAG_WEB_011`, manteniendo unicamente las vulnerabilidades intencionales (ej. `web-005` ubica `/flag.txt` fuera de `/app`).
-- **UI y no indexacion**: Todas las vistas utilizan [docker/shared/global.css](../docker/shared/global.css) (tokens 60-30-10) y [docker/shared/ui.py](../docker/shared/ui.py) (HTML5 semantico, `<meta name="robots" content="noindex, nofollow">`, cabeceras `X-Robots-Tag`, `nosniff`, `no-referrer`).
+- **UI y no indexacion**: Todas las vistas consumen directamente los archivos unicos [docker/shared/global.css](../docker/shared/global.css) (tokens 60-30-10) y [docker/shared/ui.py](../docker/shared/ui.py) (HTML5 semantico, `<meta name="robots" content="noindex, nofollow">`, cabeceras `X-Robots-Tag`, `nosniff`, `no-referrer`).
 
 ### 2.2 Contenedor Monolitico con Nginx (Railway PaaS)
 
-Definido en [docker/monolithic/](../docker/monolithic/Dockerfile) y generado desde [docker/build_monolithic.py](../docker/build_monolithic.py). Dado que Railway expone un unico dominio por servicio con puerto dinamico `$PORT`, Nginx enruta mediante subrutas `/web-001/` a `/web-011/` junto a un indice semantico en `/`.
+Definido en [docker/monolithic/](../docker/monolithic/Dockerfile) (unicamente `Dockerfile`, `start.sh` y `web-index/index.html`) y generado desde [docker/build_monolithic.py](../docker/build_monolithic.py) copiando en build-time las fuentes canonicas desde `docker/shared/` y `docker/challenge-web-*/` sin duplicar archivos en Git. Dado que Railway expone un unico dominio por servicio con puerto dinamico `$PORT`, Nginx enruta mediante subrutas `/web-001/` a `/web-011/` junto a un indice semantico en `/`.
 
 **Aislamiento y Configuracion Actual:**
 - Basado en `python:3.12-slim` + `waitress` + `nginx` con portabilidad para `${PORT:-80}` y cabeceras `X-Robots-Tag: noindex, nofollow`.

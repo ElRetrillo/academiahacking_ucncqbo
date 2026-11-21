@@ -1,0 +1,11 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = [".", "shared"]
+
+[tool.pyrefly]
+project-includes = ["."]
+project-excludes = [".venv", "**/__pycache__"]
+search-path = [".", "shared"]
+
+[tool.pyrefly.errors]
+untyped-import = false
