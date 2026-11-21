@@ -2,72 +2,87 @@ from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent
 MONO_DIR = BASE_DIR / "monolithic"
+SHARED_DIR = BASE_DIR / "shared"
 
-HTML_001 = """<!DOCTYPE html>
-<html lang="es">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Acceso Restringido - SecureCorp</title>
-    <link rel="stylesheet" href="style.css">
-</head>
-<body>
-    <div class="login-card">
-        <h1>SecureCorp</h1>
-        <p style="font-size: 0.9rem; margin-bottom: 2rem; opacity: 0.7;">Portal Interno de Administración</p>
-        <form method="POST" action="">
-            <div class="input-group">
-                <label>Usuario</label>
-                <input type="text" name="user" placeholder="Introduzca su ID" required>
-            </div>
-            <div class="input-group">
-                <label>Contraseña</label>
-                <input type="password" name="password" placeholder="••••••••" required>
-            </div>
-            <button type="submit">Autenticar</button>
-        </form>
-        <div class="footer">
-            &copy; 2026 SecureCorp Defence Systems. Todos los derechos reservados.
-            <!-- DEBUG_MODE: Enabled -->
-            <!-- Credenciales de emergencia (borrar en prod): admin / s3cur3p4ss -->
-            <!-- Pista: ¿Has mirado debajo de la alfombra digital? __CHALLENGE_FLAG__ -->
-        </div>
-    </div>
-</body>
-</html>
-"""
+CHALLENGE_TILES = [
+    ("001", "Hidden in Plain Sight"),
+    ("002", "Robots & Crawlers"),
+    ("003", "Cookie Tampering"),
+    ("004", "Ping of Death"),
+    ("005", "LFI to RCE"),
+    ("006", "SQLi Login Bypass"),
+    ("007", "IDOR Profiles"),
+    ("008", "Server-Side Template Injection"),
+    ("009", "Source Code Leak"),
+    ("010", "Headers Matter"),
+    ("011", "Command Execution GET"),
+]
 
-CSS_001 = (
-    'body { background: radial-gradient(circle at center, #1a1a2e 0%, #16213e 100%); '
-    'color: #e94560; font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif; '
-    'display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; '
-    'overflow: hidden; } .login-card { background: rgba(22, 33, 62, 0.8); '
-    'backdrop-filter: blur(10px); padding: 2.5rem; border-radius: 15px; '
-    'box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.8); border: 1px solid rgba(233, 69, 96, 0.2); '
-    'width: 100%; max-width: 400px; text-align: center; animation: fadeIn 0.8s ease-out; } '
-    '@keyframes fadeIn { from { opacity: 0; transform: translateY(20px); } '
-    'to { opacity: 1; transform: translateY(0); } } h1 { margin-bottom: 1.5rem; '
-    'font-weight: 300; letter-spacing: 2px; text-transform: uppercase; } '
-    '.input-group { margin-bottom: 1rem; text-align: left; } label { display: block; '
-    'margin-bottom: 0.5rem; font-size: 0.8rem; opacity: 0.8; } input { width: 100%; '
-    'padding: 0.8rem; background: #0f3460; border: 1px solid #16213e; border-radius: 5px; '
-    'color: white; outline: none; transition: border 0.3s; } input:focus { border: 1px solid #e94560; } '
-    'button { width: 100%; padding: 1rem; background: #e94560; color: white; border: none; '
-    'border-radius: 5px; cursor: pointer; font-weight: bold; text-transform: uppercase; '
-    'transition: 0.3s; margin-top: 1rem; } button:hover { background: #ff2e63; '
-    'box-shadow: 0 0 15px rgba(233, 69, 96, 0.4); } .footer { margin-top: 1.5rem; '
-    'font-size: 0.7rem; opacity: 0.5; }\n'
-)
+
+def render_master_index() -> str:
+    tiles_html = "\n".join(
+        f'                    <a class="ctf-tile" href="/web-{cid}/">'
+        f'<span class="ctf-badge">web-{cid}</span>'
+        f"<span>{title}</span></a>"
+        for cid, title in CHALLENGE_TILES
+    )
+    return (
+        "<!DOCTYPE html>\n"
+        '<html lang="es">\n'
+        "<head>\n"
+        '    <meta charset="UTF-8">\n'
+        '    <meta name="viewport" content="width=device-width, initial-scale=1.0">\n'
+        '    <meta name="robots" content="noindex, nofollow">\n'
+        "    <title>Nodo de Retos | EclipSec CTF</title>\n"
+        '    <link rel="stylesheet" href="global.css">\n'
+        "</head>\n"
+        "<body>\n"
+        '    <div class="ctf-shell">\n'
+        '        <main id="main-content" class="ctf-card ctf-card--wide">\n'
+        '            <header class="ctf-header">\n'
+        '                <span class="ctf-badge">EclipSec CTF</span>\n'
+        "                <h1>EclipSec CTF Master Node</h1>\n"
+        '                <p class="ctf-lead">Retos web disponibles en /web-001/ hasta /web-011/.</p>\n'
+        "            </header>\n"
+        '            <section class="ctf-section">\n'
+        '                <nav aria-label="Retos disponibles" class="ctf-grid">\n'
+        f"{tiles_html}\n"
+        "                </nav>\n"
+        "            </section>\n"
+        '            <footer class="ctf-footer">\n'
+        "                &copy; 2026 EclipSec Academia de Hacking Competitivo UCN Coquimbo.\n"
+        "            </footer>\n"
+        "        </main>\n"
+        "    </div>\n"
+        "</body>\n"
+        "</html>\n"
+    )
 
 
 def build_monolithic_bundle(base_dir: Path, mono_dir: Path) -> None:
     """Sync isolated challenge apps into docker/monolithic and render nginx/Dockerfile."""
     mono_dir.mkdir(parents=True, exist_ok=True)
+    css_content = (base_dir / "shared" / "global.css").read_text(encoding="utf-8")
 
+    web_index_dir = mono_dir / "web-index"
+    web_index_dir.mkdir(parents=True, exist_ok=True)
+    (web_index_dir / "index.html").write_text(
+        render_master_index(), encoding="utf-8", newline="\n"
+    )
+    (web_index_dir / "global.css").write_text(css_content, encoding="utf-8", newline="\n")
+
+    web_001_src = base_dir / "challenge-web-001"
     web_001_dir = mono_dir / "web-001"
     web_001_dir.mkdir(parents=True, exist_ok=True)
-    (web_001_dir / "index.html").write_text(HTML_001, encoding="utf-8", newline="\n")
-    (web_001_dir / "style.css").write_text(CSS_001, encoding="utf-8", newline="\n")
+    (web_001_dir / "index.html").write_text(
+        (web_001_src / "index.html").read_text(encoding="utf-8"),
+        encoding="utf-8",
+        newline="\n",
+    )
+    (web_001_dir / "global.css").write_text(css_content, encoding="utf-8", newline="\n")
+    legacy_style = web_001_dir / "style.css"
+    if legacy_style.exists():
+        legacy_style.unlink()
 
     nginx_blocks = [
         """
@@ -81,13 +96,17 @@ def build_monolithic_bundle(base_dir: Path, mono_dir: Path) -> None:
 
     for i in range(2, 12):
         ch = f"{i:03d}"
-        src = base_dir / f"challenge-web-{ch}" / "app.py"
+        src_dir = base_dir / f"challenge-web-{ch}"
         dst_dir = mono_dir / f"web-{ch}"
         dst_dir.mkdir(parents=True, exist_ok=True)
 
         port_web = 8000 + i
-        content = src.read_text(encoding="utf-8").replace("port=8000", f"port={port_web}")
-        (dst_dir / "app.py").write_text(content, encoding="utf-8", newline="\n")
+        for filename in ("app.py", "ui.py", "global.css"):
+            (dst_dir / filename).write_text(
+                (src_dir / filename).read_text(encoding="utf-8"),
+                encoding="utf-8",
+                newline="\n",
+            )
 
         nginx_blocks.append(
             f"""
@@ -99,34 +118,42 @@ def build_monolithic_bundle(base_dir: Path, mono_dir: Path) -> None:
     }}
 """
         )
-        if ch == "008":
-            start_cmds.append(
-                'su -s /bin/sh web008 -c \'cd /app/web-008 && FLAG="$(cat /app/web-008/.flag)" && export FLAG && exec python3 app.py\' &'
-            )
-        else:
-            start_cmds.append(
-                f'su -s /bin/sh web{ch} -c "cd /app/web-{ch} && exec python3 app.py" &'
-            )
+        start_cmds.append(
+            f'setpriv --reuid=web{ch} --regid=web{ch} --clear-groups sh -c "cd /app/web-{ch} && HOST=127.0.0.1 PORT={port_web} exec python3 app.py" &'
+        )
 
     start_sh = (
         """#!/bin/bash
 set -e
 
+LISTEN_PORT="${PORT:-80}"
+
 cat > /etc/nginx/sites-available/default << 'NGINXCONF'
 server {
-    listen 80 default_server;
-    listen [::]:80 default_server;
+    listen __PORT__ default_server;
+    listen [::]:__PORT__ default_server;
     server_name _;
 
+    add_header X-Robots-Tag "noindex, nofollow" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "no-referrer" always;
+
+    location = /global.css {
+        alias /app/web-index/global.css;
+    }
+
     location / {
-        return 200 '<html><body style="background:#1a1a2e;color:#e94560;font-family:sans-serif;text-align:center;padding:50px;"><h1>EclipSec CTF Master Node</h1><p>Challenges available at /web-001/ to /web-011/</p></body></html>';
-        add_header Content-Type text/html;
+        root /app/web-index;
+        index index.html;
+        try_files $uri $uri/ =404;
     }
 """
         + "".join(nginx_blocks)
         + """
 }
 NGINXCONF
+
+sed -i "s/__PORT__/${LISTEN_PORT}/g" /etc/nginx/sites-available/default
 
 nginx -t
 
@@ -140,14 +167,17 @@ exec nginx -g "daemon off;"
     )
     (mono_dir / "start.sh").write_text(start_sh, encoding="utf-8", newline="\n")
 
-    dockerfile = """FROM ubuntu:22.04
-ENV DEBIAN_FRONTEND=noninteractive
+    dockerfile = """FROM python:3.12-slim
+
+ENV DEBIAN_FRONTEND=noninteractive \\
+    PYTHONUNBUFFERED=1 \\
+    PYTHONDONTWRITEBYTECODE=1
 
 RUN apt-get update && apt-get install -y --no-install-recommends \\
-    nginx ca-certificates bash python3 python3-pip iputils-ping sqlite3 \\
+    nginx ca-certificates iputils-ping sqlite3 util-linux \\
     && rm -rf /var/lib/apt/lists/*
 
-RUN pip3 install --no-cache-dir flask
+RUN pip install --no-cache-dir "flask>=3.0.0" "waitress>=3.0.0"
 
 RUN for uid in 002 003 004 005 006 007 008 009 010 011; do \\
         useradd --system --no-create-home --shell /usr/sbin/nologin "web${uid}"; \\
@@ -165,6 +195,7 @@ ARG FLAG_WEB_009='EclipSec{b4ckup_f1l3s_4r3_l34ks}'
 ARG FLAG_WEB_010='EclipSec{h34d3rs_c4n_b3_sp00f3d}'
 ARG FLAG_WEB_011='EclipSec{c0mm4nd_3x3cut10n_v1a_g3t}'
 
+COPY docker/monolithic/web-index /app/web-index
 COPY docker/monolithic/web-001 /app/web-001
 COPY docker/monolithic/web-002 /app/web-002
 COPY docker/monolithic/web-003 /app/web-003
@@ -183,9 +214,9 @@ RUN sed -i 's/\\r$//' /usr/local/sbin/start.sh && \\
     chmod 700 /usr/local/sbin/start.sh
 
 RUN python3 -c "import os, pathlib; p = pathlib.Path('/app/web-001/index.html'); p.write_text(p.read_text(encoding='utf-8').replace('__CHALLENGE_FLAG__', os.environ['FLAG_WEB_001']), encoding='utf-8')" && \\
-    chown -R root:www-data /app/web-001 && \\
-    chmod 750 /app/web-001 && \\
-    chmod 640 /app/web-001/*
+    chown -R root:www-data /app/web-001 /app/web-index && \\
+    chmod 550 /app/web-001 /app/web-index && \\
+    chmod 440 /app/web-001/* /app/web-index/*
 
 RUN printf '%s\\n' "$FLAG_WEB_002" > /app/web-002/.flag && \\
     printf '%s\\n' "$FLAG_WEB_003" > /app/web-003/.flag && \\
@@ -205,9 +236,8 @@ RUN printf '%s\\n' "$FLAG_WEB_002" > /app/web-002/.flag && \\
     done && \\
     chown root:web005 /flag.txt && chmod 440 /flag.txt && \\
     chown web006:web006 /app/web-006 && chmod 700 /app/web-006 && \\
-    chown root:web006 /app/web-006/app.py /app/web-006/.flag && \\
-    chmod 440 /app/web-006/app.py /app/web-006/.flag && \\
-    chmod 440 /app/web-002/.flag /app/web-003/.flag /app/web-007/.flag /app/web-008/.flag /app/web-009/.flag /app/web-010/.flag
+    chown root:web006 /app/web-006/app.py /app/web-006/ui.py /app/web-006/global.css /app/web-006/.flag && \\
+    chmod 440 /app/web-006/app.py /app/web-006/ui.py /app/web-006/global.css /app/web-006/.flag
 
 EXPOSE 80
 

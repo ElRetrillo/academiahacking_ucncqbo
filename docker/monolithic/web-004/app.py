@@ -1,30 +1,43 @@
+import os
 import subprocess
-from flask import Flask, request, render_template_string
+
+from flask import Flask, render_template_string, request
+from waitress import serve
+
+from ui import register_challenge_ui, render_page
 
 app = Flask(__name__)
+register_challenge_ui(app)
 
-template = '''
-<html><body style="background:#1a1a2e;color:#e94560;font-family:sans-serif;text-align:center;padding:50px;">
-<h1>Network Diagnostic Tool</h1>
-<form method="POST">
-    <label>IP to ping:</label>
-    <input type="text" name="ip" value="127.0.0.1">
-    <button type="submit">Ping</button>
-</form>
-<pre style="text-align:left; background:#0f3460; padding:20px; color:white;">{{ output }}</pre>
-</body></html>
-'''
+BODY_TEMPLATE = (
+    '<form method="POST" action="" class="ctf-form">'
+    '<div class="ctf-field">'
+    '<label class="ctf-label" for="ping-ip">Direccion IP o host</label>'
+    '<input class="ctf-input" id="ping-ip" type="text" name="ip" value="127.0.0.1" required>'
+    "</div>"
+    '<button type="submit" class="ctf-btn ctf-btn--primary">Ejecutar Ping</button>'
+    "</form>"
+    '<pre class="ctf-output">{{ output }}</pre>'
+)
+PAGE_TEMPLATE = render_page(
+    title="Diagnostico de Red",
+    heading="Herramienta de Diagnostico",
+    subtitle="Comprueba la conectividad ICMP hacia un nodo destino.",
+    badge="Diagnostico",
+    body_html=BODY_TEMPLATE,
+    wide=True,
+)
 
 
-@app.route('/', methods=['GET', 'POST'])
+@app.route("/", methods=["GET", "POST"])
 def index():
-    output = ''
-    if request.method == 'POST':
-        ip = request.form.get('ip', '')
+    output = ""
+    if request.method == "POST":
+        ip = request.form.get("ip", "")
         try:
             # Intentional command injection vulnerability for CTF training
             result = subprocess.run(
-                f'ping -c 1 {ip}',
+                f"ping -c 1 {ip}",
                 shell=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
@@ -33,9 +46,9 @@ def index():
             )
             output = result.stdout
         except subprocess.TimeoutExpired:
-            output = 'Command timed out'
-    return render_template_string(template, output=output)
+            output = "Command timed out"
+    return render_template_string(PAGE_TEMPLATE, output=output)
 
 
-if __name__ == '__main__':
-    app.run(host='127.0.0.1', port=8004)
+if __name__ == "__main__":
+    serve(app, host=os.environ.get("HOST", "0.0.0.0"), port=int(os.environ.get("PORT", "8000")), threads=4)

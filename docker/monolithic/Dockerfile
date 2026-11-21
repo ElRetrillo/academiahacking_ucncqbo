@@ -1,11 +1,14 @@
-FROM ubuntu:22.04
-ENV DEBIAN_FRONTEND=noninteractive
+FROM python:3.12-slim
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    nginx ca-certificates bash python3 python3-pip iputils-ping sqlite3 \
+    nginx ca-certificates iputils-ping sqlite3 util-linux \
     && rm -rf /var/lib/apt/lists/*
 
-RUN pip3 install --no-cache-dir flask
+RUN pip install --no-cache-dir "flask>=3.0.0" "waitress>=3.0.0"
 
 RUN for uid in 002 003 004 005 006 007 008 009 010 011; do \
         useradd --system --no-create-home --shell /usr/sbin/nologin "web${uid}"; \
@@ -23,6 +26,7 @@ ARG FLAG_WEB_009='EclipSec{b4ckup_f1l3s_4r3_l34ks}'
 ARG FLAG_WEB_010='EclipSec{h34d3rs_c4n_b3_sp00f3d}'
 ARG FLAG_WEB_011='EclipSec{c0mm4nd_3x3cut10n_v1a_g3t}'
 
+COPY docker/monolithic/web-index /app/web-index
 COPY docker/monolithic/web-001 /app/web-001
 COPY docker/monolithic/web-002 /app/web-002
 COPY docker/monolithic/web-003 /app/web-003
@@ -41,9 +45,9 @@ RUN sed -i 's/\r$//' /usr/local/sbin/start.sh && \
     chmod 700 /usr/local/sbin/start.sh
 
 RUN python3 -c "import os, pathlib; p = pathlib.Path('/app/web-001/index.html'); p.write_text(p.read_text(encoding='utf-8').replace('__CHALLENGE_FLAG__', os.environ['FLAG_WEB_001']), encoding='utf-8')" && \
-    chown -R root:www-data /app/web-001 && \
-    chmod 750 /app/web-001 && \
-    chmod 640 /app/web-001/*
+    chown -R root:www-data /app/web-001 /app/web-index && \
+    chmod 550 /app/web-001 /app/web-index && \
+    chmod 440 /app/web-001/* /app/web-index/*
 
 RUN printf '%s\n' "$FLAG_WEB_002" > /app/web-002/.flag && \
     printf '%s\n' "$FLAG_WEB_003" > /app/web-003/.flag && \
@@ -63,9 +67,8 @@ RUN printf '%s\n' "$FLAG_WEB_002" > /app/web-002/.flag && \
     done && \
     chown root:web005 /flag.txt && chmod 440 /flag.txt && \
     chown web006:web006 /app/web-006 && chmod 700 /app/web-006 && \
-    chown root:web006 /app/web-006/app.py /app/web-006/.flag && \
-    chmod 440 /app/web-006/app.py /app/web-006/.flag && \
-    chmod 440 /app/web-002/.flag /app/web-003/.flag /app/web-007/.flag /app/web-008/.flag /app/web-009/.flag /app/web-010/.flag
+    chown root:web006 /app/web-006/app.py /app/web-006/ui.py /app/web-006/global.css /app/web-006/.flag && \
+    chmod 440 /app/web-006/app.py /app/web-006/ui.py /app/web-006/global.css /app/web-006/.flag
 
 EXPOSE 80
 

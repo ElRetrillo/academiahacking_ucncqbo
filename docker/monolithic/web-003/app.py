@@ -1,7 +1,15 @@
+import html
+import os
 from pathlib import Path
-from flask import Flask, request, make_response
+
+from flask import Flask, make_response, request
+from waitress import serve
+
+from ui import register_challenge_ui, render_page
 
 app = Flask(__name__)
+register_challenge_ui(app)
+
 FLAG_PATH = Path(__file__).resolve().parent / ".flag"
 
 
@@ -11,15 +19,32 @@ def read_flag() -> str:
     return ""
 
 
-@app.route('/')
+@app.route("/")
 def index():
-    role = request.cookies.get('role', 'guest')
-    if role == 'admin':
-        return f'<html><body style="background:#1a1a2e;color:#e94560;font-family:sans-serif;text-align:center;padding:50px;"><h1>Welcome Admin!</h1><p>{read_flag()}</p></body></html>'
-    resp = make_response('<html><body style="background:#1a1a2e;color:#e94560;font-family:sans-serif;text-align:center;padding:50px;"><h1>Welcome Guest!</h1><p>You are not an admin.</p></body></html>')
-    resp.set_cookie('role', 'guest')
+    role = request.cookies.get("role", "guest")
+    if role == "admin":
+        body = f'<p class="ctf-alert ctf-alert--success">Acceso administrativo verificado: {html.escape(read_flag())}</p>'
+        return render_page(
+            title="Panel Admin",
+            heading="Bienvenido Administrador",
+            subtitle="Sesion privilegiada activa",
+            badge="Control de Rol",
+            body_html=body,
+        )
+
+    body = '<p class="ctf-alert ctf-alert--info">Sesion actual: invitado. Se requiere rol de administrador.</p>'
+    resp = make_response(
+        render_page(
+            title="Panel Invitado",
+            heading="Bienvenido Invitado",
+            subtitle="No cuentas con privilegios de administrador",
+            badge="Control de Rol",
+            body_html=body,
+        )
+    )
+    resp.set_cookie("role", "guest")
     return resp
 
 
-if __name__ == '__main__':
-    app.run(host='127.0.0.1', port=8003)
+if __name__ == "__main__":
+    serve(app, host=os.environ.get("HOST", "0.0.0.0"), port=int(os.environ.get("PORT", "8000")), threads=4)
