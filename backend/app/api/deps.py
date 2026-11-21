@@ -173,7 +173,7 @@ async def is_token_revoked(
 ) -> bool:
     if not jti:
         return False
-    return await token_repo.is_revoked(str(jti))
+    return await token_repo.is_revoked(jti)
 
 
 async def revoke_token(

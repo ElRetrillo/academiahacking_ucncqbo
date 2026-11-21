@@ -103,7 +103,7 @@ async def ctf_academy_handler(
                 password=body.password or "",
             )
         except HTTPException as exc:
-            return json_response(exc.status_code, err_resp(str(exc.detail)))
+            return json_response(exc.status_code, err_resp(exc.detail))
 
         data = await academy_service.build_state(user)
         resp = json_response(200, ok_resp("Usuario creado. Bienvenido a la Academia.", data=data))
@@ -123,7 +123,7 @@ async def ctf_academy_handler(
                 password=body.password or "",
             )
         except HTTPException as exc:
-            return json_response(exc.status_code, err_resp(str(exc.detail)))
+            return json_response(exc.status_code, err_resp(exc.detail))
 
         data = await academy_service.build_state(user)
         resp = json_response(200, ok_resp("Sesion iniciada.", data=data))

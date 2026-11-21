@@ -41,13 +41,13 @@ class SqlAlchemyChallengeRepository:
 
     async def get_category_summary(self) -> list[tuple[str, int]]:
         query = (
-            select(Challenge.category, func.count(Challenge.id).label("count"))
+            select(Challenge.category, func.count(Challenge.id).label("total"))
             .where(Challenge.is_active.is_(True))
             .group_by(Challenge.category)
             .order_by(Challenge.category.asc())
         )
         result = await self._db.execute(query)
-        return [(str(row.category), int(row.count)) for row in result.all()]
+        return [(category, total) for category, total in result.all()]
 
     async def get_active_by_id_or_slug(self, challenge_id_or_slug: str) -> Optional[Challenge]:
         query = select(Challenge).where(
@@ -73,7 +73,7 @@ class SqlAlchemyChallengeRepository:
         result = await self._db.execute(
             select(func.count()).select_from(Challenge).where(Challenge.is_active.is_(True))
         )
-        return int(result.scalar() or 0)
+        return result.scalar() or 0
 
     async def get_solved_challenge_ids(self, user_id: str) -> set[str]:
         result = await self._db.execute(select(Solve.challenge_id).where(Solve.user_id == user_id))
@@ -141,11 +141,11 @@ class SqlAlchemyChallengeRepository:
         except IntegrityError:
             await self._db.rollback()
             await self._db.refresh(user)
-            return False, int(user.score)
+            return False, user.score
 
         await self._db.refresh(user)
         await self._db.refresh(challenge)
-        return True, int(user.score)
+        return True, user.score
 
     async def get_running_instance(
         self,

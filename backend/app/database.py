@@ -1,11 +1,13 @@
+from collections.abc import AsyncGenerator
+
 from sqlalchemy import event, pool
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.orm import declarative_base
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.orm import DeclarativeBase
 
 from app.config import settings
 
 
-def enable_sqlite_foreign_keys(target_engine) -> None:
+def enable_sqlite_foreign_keys(target_engine: AsyncEngine) -> None:
     @event.listens_for(target_engine.sync_engine, "connect")
     def _set_sqlite_pragma(dbapi_connection, connection_record) -> None:
         cursor = dbapi_connection.cursor()
@@ -39,10 +41,12 @@ AsyncSessionLocal = async_sessionmaker(
     autoflush=False,
 )
 
-Base = declarative_base()
+
+class Base(DeclarativeBase):
+    pass
 
 
-async def get_db():
+async def get_db() -> AsyncGenerator[AsyncSession, None]:
     async with AsyncSessionLocal() as session:
         try:
             yield session

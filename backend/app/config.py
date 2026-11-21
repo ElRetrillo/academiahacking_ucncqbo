@@ -1,5 +1,6 @@
+import json
 from pathlib import Path
-from typing import List, Optional, Union
+from typing import List, Literal, Optional, Union, cast
 
 from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -9,7 +10,7 @@ DEFAULT_DATABASE_URL = f"sqlite+aiosqlite:///{(BACKEND_DIR / 'ctf.db').as_posix(
 
 _DEV_JWT_MARKERS = ("change-this-in-production", "example_", "CHANGE_ME")
 _DEV_HMAC_MARKERS = ("dev-only", "example_", "CHANGE_ME")
-_ALLOWED_SAMESITE_VALUES = {"lax", "strict", "none"}
+_ALLOWED_SAMESITE_VALUES = ("lax", "strict", "none")
 
 
 class Settings(BaseSettings):
@@ -38,7 +39,7 @@ class Settings(BaseSettings):
     COOKIE_NAME: str = "eclipsec_session"
     CSRF_COOKIE_NAME: str = "eclipsec_csrf"
     COOKIE_SECURE: Optional[bool] = None
-    COOKIE_SAMESITE: str = "lax"
+    COOKIE_SAMESITE: Literal["lax", "strict", "none"] = "lax"
     COOKIE_DOMAIN: Optional[str] = None
 
     ALLOW_FIRST_USER_ADMIN: bool = False
@@ -88,19 +89,21 @@ class Settings(BaseSettings):
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod
     def assemble_cors_origins(cls, v: Union[str, List[str]]) -> List[str]:
-        if isinstance(v, str) and not v.startswith("["):
-            return [i.strip() for i in v.split(",") if i.strip()]
-        if isinstance(v, (list, str)):
-            return v
-        return []
+        if isinstance(v, str):
+            stripped = v.strip()
+            if stripped.startswith("["):
+                parsed = json.loads(stripped)
+                return [str(item).strip() for item in parsed if str(item).strip()]
+            return [i.strip() for i in stripped.split(",") if i.strip()]
+        return [item.strip() for item in v if item.strip()]
 
     @field_validator("COOKIE_SAMESITE", mode="before")
     @classmethod
-    def validate_cookie_samesite(cls, v: str) -> str:
+    def validate_cookie_samesite(cls, v: object) -> Literal["lax", "strict", "none"]:
         normalized = str(v).strip().lower()
         if normalized not in _ALLOWED_SAMESITE_VALUES:
             raise ValueError("COOKIE_SAMESITE must be one of: lax, strict, none.")
-        return normalized
+        return cast(Literal["lax", "strict", "none"], normalized)
 
     @field_validator("TRUSTED_PROXY_COUNT")
     @classmethod

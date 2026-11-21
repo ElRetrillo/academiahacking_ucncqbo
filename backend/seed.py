@@ -5,6 +5,7 @@ import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import NotRequired, Optional, TypedDict
 
 BACKEND_DIR = Path(__file__).resolve().parent
 if str(BACKEND_DIR) not in sys.path:
@@ -28,7 +29,23 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_DEV_ADMIN_PASSWORDS = ("admin123456", "CHANGE_ME", "example_")
 
-CHALLENGES_DATA = [
+
+class ChallengeSeedSpec(TypedDict):
+    slug: str
+    title: str
+    category: str
+    difficulty: str
+    points: int
+    default_flag: str
+    description: str
+    target_url: Optional[str]
+    hints: Optional[str]
+    version: NotRequired[str]
+    repository: NotRequired[str]
+    path: NotRequired[str]
+
+
+CHALLENGES_DATA: list[ChallengeSeedSpec] = [
     {
         "slug": "web-001",
         "title": "Hidden in Plain Sight",

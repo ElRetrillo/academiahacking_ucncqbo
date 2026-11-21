@@ -93,6 +93,7 @@ async def test_session_cookie_csrf_and_jti_revocation(
     assert missing_csrf.status_code == 403
 
     csrf_token = client.cookies.get(settings.CSRF_COOKIE_NAME)
+    assert csrf_token is not None
     valid_submit = await client.post(
         f"/api/v1/challenges/{sample_challenge.slug}/submit",
         json={"flag": "EclipSec{sample_flag_test}"},
@@ -102,6 +103,7 @@ async def test_session_cookie_csrf_and_jti_revocation(
     assert valid_submit.json()["is_correct"] is True
 
     captured_session_cookie = client.cookies.get(settings.COOKIE_NAME)
+    assert captured_session_cookie is not None
     logout_resp = await client.post(
         "/api/v1/auth/session/logout",
         headers={"X-CSRF-Token": csrf_token},
@@ -222,6 +224,7 @@ async def test_ctf_academy_hardening_and_security_headers(
     assert reg_resp.headers.get("Cache-Control") == "no-store"
 
     csrf_token = client.cookies.get(settings.CSRF_COOKIE_NAME)
+    assert csrf_token is not None
     complete_no_csrf = await client.post(
         "/api/ctf-academy",
         json={"action": "complete", "challengeId": sample_challenge.slug, "flag": "EclipSec{sample_flag_test}"},

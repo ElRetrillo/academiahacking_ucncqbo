@@ -16,7 +16,7 @@ class AuthService:
         self._user_repo = user_repo
 
     async def register_user(self, req: RegisterRequest) -> User:
-        existing_user = await self._user_repo.find_conflicting_user(req.username, str(req.email))
+        existing_user = await self._user_repo.find_conflicting_user(req.username, req.email)
         if existing_user:
             if existing_user.username.lower() == req.username.lower():
                 raise HTTPException(
@@ -35,7 +35,7 @@ class AuthService:
         now = datetime.now(timezone.utc)
         new_user = User(
             username=req.username,
-            email=str(req.email).lower(),
+            email=req.email.lower(),
             hashed_password=hash_password(req.password),
             nationality=req.nationality.upper(),
             role=role,
@@ -47,7 +47,7 @@ class AuthService:
         try:
             return await self._user_repo.create(new_user)
         except IntegrityError as exc:
-            conflict = await self._user_repo.find_conflicting_user(req.username, str(req.email))
+            conflict = await self._user_repo.find_conflicting_user(req.username, req.email)
             if conflict and conflict.username.lower() == req.username.lower():
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,

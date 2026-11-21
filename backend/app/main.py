@@ -1,3 +1,4 @@
+import importlib
 import logging
 from contextlib import asynccontextmanager
 
@@ -29,7 +30,7 @@ async def lifespan(app: FastAPI):
             try:
                 from seed import sync_seed_data
             except ImportError:
-                from backend.seed import sync_seed_data
+                sync_seed_data = importlib.import_module("backend.seed").sync_seed_data
 
             async with AsyncSessionLocal() as db:
                 summary = await sync_seed_data(db)

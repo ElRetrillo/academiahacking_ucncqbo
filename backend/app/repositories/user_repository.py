@@ -54,7 +54,7 @@ class SqlAlchemyUserRepository:
 
     async def count_all(self) -> int:
         result = await self._db.execute(select(func.count()).select_from(User))
-        return int(result.scalar() or 0)
+        return result.scalar() or 0
 
     async def has_any_admin(self) -> bool:
         result = await self._db.execute(select(User.id).where(User.role == "admin").limit(1))
@@ -78,16 +78,16 @@ class SqlAlchemyUserRepository:
         result = await self._db.execute(
             select(func.count()).select_from(Solve).where(Solve.user_id == user_id)
         )
-        return int(result.scalar() or 0)
+        return result.scalar() or 0
 
     async def get_solves_by_category(self, user_id: str) -> list[tuple[str, int]]:
         result = await self._db.execute(
-            select(Challenge.category, func.count(Solve.id).label("count"))
+            select(Challenge.category, func.count(Solve.id).label("total"))
             .join(Solve, Solve.challenge_id == Challenge.id)
             .where(Solve.user_id == user_id)
             .group_by(Challenge.category)
         )
-        return [(str(row.category), int(row.count)) for row in result.all()]
+        return [(category, total) for category, total in result.all()]
 
     async def get_recent_solves(
         self,

@@ -133,7 +133,7 @@ class CtfAcademyService:
                 detail="Formato de usuario o contrasena invalido.",
             ) from exc
         except HTTPException as exc:
-            detail = str(exc.detail).lower()
+            detail = exc.detail.lower()
             if any(marker in detail for marker in ("already", "exist", "registered")):
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,

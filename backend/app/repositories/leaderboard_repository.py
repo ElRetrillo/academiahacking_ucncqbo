@@ -70,7 +70,7 @@ class SqlAlchemyLeaderboardRepository:
             .select_from(User)
             .where(User.is_active.is_(True), User.role == "user")
         )
-        return int(total_res.scalar() or 0)
+        return total_res.scalar() or 0
 
     async def get_country_entries(self) -> list[CountryLeaderboardEntry]:
         solve_subquery = (
@@ -160,5 +160,5 @@ class SqlAlchemyLeaderboardRepository:
             )
         )
         ahead_res = await self._db.execute(ahead_query)
-        ahead_count = int(ahead_res.scalar() or 0)
+        ahead_count = ahead_res.scalar() or 0
         return ahead_count + 1

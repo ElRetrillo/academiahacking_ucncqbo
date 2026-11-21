@@ -1,8 +1,17 @@
-from sqlalchemy import Column, DateTime, ForeignKey, Index, String
-from sqlalchemy.orm import relationship
+from __future__ import annotations
+
+from datetime import datetime
+from typing import TYPE_CHECKING, Optional
+
+from sqlalchemy import DateTime, ForeignKey, Index, String
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
 from app.models.base_utils import generate_uuid, utc_now
+
+if TYPE_CHECKING:
+    from app.models.challenge import Challenge
+    from app.models.user import User
 
 STATUS_RUNNING = "running"
 STATUS_STOPPED = "stopped"
@@ -22,16 +31,22 @@ class ChallengeInstance(Base):
         ),
     )
 
-    id = Column(String(36), primary_key=True, default=generate_uuid, index=True)
-    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
-    challenge_id = Column(String(36), ForeignKey("challenges.id", ondelete="CASCADE"), nullable=False, index=True)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid, index=True)
+    user_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    challenge_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("challenges.id", ondelete="CASCADE"), nullable=False, index=True
+    )
 
-    status = Column(String(20), default=STATUS_RUNNING, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default=STATUS_RUNNING, nullable=False)
 
-    created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
-    started_at = Column(DateTime(timezone=True), default=utc_now, nullable=True)
-    stopped_at = Column(DateTime(timezone=True), nullable=True)
-    expiration_at = Column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+    started_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=True
+    )
+    stopped_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    expiration_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    user = relationship("User", back_populates="instances")
-    challenge = relationship("Challenge", back_populates="instances")
+    user: Mapped["User"] = relationship("User", back_populates="instances")
+    challenge: Mapped["Challenge"] = relationship("Challenge", back_populates="instances")
