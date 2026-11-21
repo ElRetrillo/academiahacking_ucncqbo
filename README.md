@@ -1,6 +1,14 @@
 # Academia de Hacking Competitivo UCN Coquimbo (EclipSec CTF)
 
-Plataforma backend e infraestructura de retos CTF de la Academia de Hacking Competitivo de la Universidad Catolica del Norte (Sede Coquimbo), disenada para integrarse con el portal web **EclipSec** (`eclipsec.cl`) y el cliente de consola **eclipsecCLI**.
+Plataforma backend e infraestructura de retos CTF de la Academia de Hacking Competitivo de la Universidad Catolica del Norte (Sede Coquimbo), integrada dentro de la carpeta conjunta `CTF-Academia_cyber` junto con el portal web **EclipSec** (`EclipSec-WebPage`) y el cliente de consola **eclipsec-cli**.
+
+---
+
+## Repositorios Relacionados (`CTF-Academia_cyber`)
+
+- `academiahacking_ucncqbo` (este repositorio): API FastAPI, migraciones Alembic y 11 retos web Docker (`docker/`).
+- `../EclipSec-WebPage`: Portal Web React + TypeScript + Vite con sesion por cookies `HttpOnly` + `X-CSRF-Token`, sistema `global.css` 60-30-10, componentes genericos, Skeletons y SEO semantico.
+- `../eclipsec-cli`: Cliente CLI Python para autenticacion, catalogo, ranking y ejecucion local de retos con Docker.
 
 ---
 

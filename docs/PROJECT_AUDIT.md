@@ -2,19 +2,21 @@
 
 **Repositorio:** `academiahacking_ucncqbo`
 **Rama de trabajo:** `feat/ctf-standards-and-docs` (originada desde `main` `da64c94`)
-**Fecha de actualizacion:** 2026-11-20
-**Alcance:** Backend API (`backend/`), migraciones (`backend/alembic/`), infraestructura de contenedores (`docker/`), configuracion de despliegue (`railway.toml`, `backend/railway.json`) y documentacion.
+**Fecha de actualizacion:** 2026-11-21
+**Alcance:** Backend API (`backend/`), migraciones (`backend/alembic/`), infraestructura de contenedores (`docker/`), documentacion e integracion multi-repositorio dentro de `CTF-Academia_cyber` (`academiahacking_ucncqbo`, `EclipSec-WebPage`, `eclipsec-cli`).
 
 ---
 
 ## 1. Resumen Ejecutivo
 
-El repositorio contiene dos componentes operativos del ecosistema CTF **EclipSec** (Academia de Hacking Competitivo UCN Coquimbo):
+El repositorio `academiahacking_ucncqbo` articula el nucleo de servicios del ecosistema CTF **EclipSec** (Academia de Hacking Competitivo UCN Coquimbo) dentro de la carpeta conjunta `CTF-Academia_cyber`:
 
-1. **Backend API (`backend/`)**: Servicio REST asincrono en FastAPI con arquitectura desacoplada por capas (Routers -> Servicios -> Repositorios `Protocol` + SQLAlchemy Async -> PostgreSQL/SQLite + Alembic), autenticacion JWT con cookies `HttpOnly` + CSRF, verificacion `HMAC-SHA256` de flags, ranking SQL unificado, registro de sesiones locales para `eclipsecCLI`, administracion RBAC y adaptador heredado (`POST /api/ctf-academy`).
+1. **Backend API (`backend/`)**: Servicio REST asincrono en FastAPI con arquitectura desacoplada por capas (Routers -> Servicios -> Repositorios `Protocol` + SQLAlchemy Async -> PostgreSQL/SQLite + Alembic), autenticacion JWT con cookies `HttpOnly` + CSRF, verificacion `HMAC-SHA256` de flags, ranking SQL unificado, registro de sesiones locales para `eclipsec-cli`, administracion RBAC y adaptador heredado (`POST /api/ctf-academy`).
 2. **Entorno de Retos Docker (`docker/`)**: 11 retos web (`web-001` a `web-011`) empaquetados como servicios individuales en `docker/challenge-web-001..011`, un entorno consolidado para Railway en `docker/monolithic/` y un `docker/docker-compose.yml` para despliegue local o en VPS.
+3. **Portal Web (`EclipSec-WebPage`, rama `feat/ctf-standards-and-docs`)**: Aplicacion React 19 + TypeScript + Vite + Tailwind v4 integrada sin exposicion de tokens en `localStorage` ni cabeceras `Authorization: Bearer` (autenticacion por cookies `HttpOnly` + `X-CSRF-Token`), sin flags hardcodeadas en el cliente, con sistema de diseno centralizado `src/styles/global.css` (regla 60-30-10), componentes genericos reutilizables (`src/components/ui/`), Skeletons de carga, SEO semantico y suite Vitest (`18` archivos / `105` pruebas en verde).
+4. **Cliente CLI (`eclipsec-cli`, rama `feat/ctf-standards-and-docs`)**: Herramienta Python (`Click` + `Requests` + `PyYAML`) endurecida contra path traversal, symlinks y hardlinks en tarballs, codificacion UTF-8 multi-SO, validacion de URL `http(s)` sin credenciales embebidas, revocacion de `jti` en `auth logout`, comandos `auth register` y `leaderboard`, verificada con `pyrefly` (`0` errores) y `pytest` (`13` pruebas en verde).
 
-El portal web frontend (`eclipsec.cl` en Vercel), el cliente CLI (`eclipsecCLI`) y el repositorio de retos descargables (`ElRetrillo/retos_ctf`) residen en repositorios externos.
+Los archivos descargables adicionales referenciados por metadatos de reto (`ElRetrillo/retos_ctf`) permanecen en el repositorio publico de retos.
 
 ### Inventario Actual de Artefactos
 
@@ -128,4 +130,4 @@ El portal web frontend (`eclipsec.cl` en Vercel), el cliente CLI (`eclipsecCLI`)
 | **Fase 3 (Completada)** | Endurecimiento DevSecOps del Backend | Validacion fail-fast de secretos; eliminacion de auto-admin; cookies `HttpOnly` + CSRF y revocacion `jti`; CORS estricto y cabeceras HTTP; rate limiting; ocultamiento de PII publica; `HMAC-SHA256` en flags/envios; `backend/Dockerfile` non-root multi-stage con `$PORT`. |
 | **Fase 4 (Completada)** | Correccion de errores, Clean Code, SOLID, Alembic y pruebas | Capa Repository (`Protocol`) + DI (`Depends`) sin SQLAlchemy en routers; ranking SQL unificado; Alembic + indices compuestos + `PRAGMA foreign_keys=ON`; updates atomicos anti-carrera; proteccion bcrypt 72B, `TRUSTED_PROXY_COUNT` y rate limiter acotado; `GET /health` con check de BD; seed idempotente; 9 suites `pytest` y Alembic validados. |
 | **Fase 5 (Completada)** | Contenedores dedicados con limites y estandar UI/HTML | Imagenes dedicadas `non-root` (`nginx:1.27-alpine`, `python:3.12-slim` + `waitress`), `read_only: true`, `cap_drop: ALL`, `mem_limit`/`memswap_limit`/`cpus`/`pids_limit`; [global.css](../docker/shared/global.css) 60-30-10 y HTML5 semantico con `noindex` en las 11 interfaces web sin romper su vulnerabilidad intencional; paridad monolitico con `setpriv` y suite E2E en verde. |
-| **Fase 6 (Siguiente)** | Integracion integral Frontend (`eclipsec.cl`) y CLI | Verificacion extremo a extremo con frontend Next.js (BFF sin tokens en navegador, componentes genericos, skeletons, SEO, tipografia) y `eclipsecCLI`. |
+| **Fase 6 (Completada)** | Integracion integral Frontend (`EclipSec-WebPage`) y CLI (`eclipsec-cli`) | Retiro de flags expuestas y legacy en frontend; migracion de auth a cookies `HttpOnly` + `X-CSRF-Token`; sistema `global.css` 60-30-10, componentes genericos, Skeletons, SEO semantico y code-splitting (`105` tests Vitest); CLI enduring multi-SO UTF-8 con validacion tar/symlink, `auth register`, `auth logout` con revocacion y `leaderboard` (`13` tests `pytest` y `0` errores `pyrefly`). |

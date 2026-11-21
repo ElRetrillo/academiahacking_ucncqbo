@@ -1,6 +1,6 @@
 # Arquitectura del Sistema EclipSec CTF
 
-Este documento describe la arquitectura vigente del entorno **EclipSec CTF** (`academiahacking_ucncqbo`), su modelo de datos, los flujos principales de interaccion y la separacion por capas alcanzada tras la Fase 4.
+Este documento describe la arquitectura vigente del entorno **EclipSec CTF** (`academiahacking_ucncqbo`), su modelo de datos, los flujos principales de interaccion y su integracion verificada con el portal web (`EclipSec-WebPage`) y la CLI (`eclipsec-cli`).
 
 ---
 
@@ -10,12 +10,12 @@ La plataforma desacopla la capa de presentacion web, la API de negocio y la ejec
 
 ```mermaid
 flowchart LR
-    Player["Jugador (Navegador Web)"] -->|"HTTPS (Cookie de Sesion)"| Frontend["Portal Web EclipSec (Next.js en Vercel)"]
-    Frontend -->|"Server-Side BFF / API REST"| Backend["Backend CTF API (FastAPI en Railway)"]
+    Player["Jugador (Navegador Web)"] -->|"HTTPS (Cookie HttpOnly + X-CSRF-Token)"| Frontend["Portal Web EclipSec (React + Vite / Vercel)"]
+    Frontend -->|"Fetch credentials:include / API REST"| Backend["Backend CTF API (FastAPI en Railway)"]
     Backend -->|"Async SQLAlchemy"| Database[("PostgreSQL Produccion / SQLite Dev")]
 
-    Cli["eclipsecCLI (Maquina del Jugador)"] -->|"REST Bearer Acotado"| Backend
-    Cli -->|"Descarga de Retos"| ChallengeRepo["Repositorio Publico de Retos (ElRetrillo/retos_ctf)"]
+    Cli["eclipsec-cli (Maquina del Jugador)"] -->|"REST Bearer Acotado (typ=cli)"| Backend
+    Cli -->|"Descarga Validada de Retos"| ChallengeRepo["Repositorio Publico de Retos (ElRetrillo/retos_ctf)"]
     Cli -->|"Docker Compose Local"| LocalSandbox["Contenedor Reto Local (localhost)"]
 
     Player -->|"HTTPS Directo"| HostedNodes["Nodos Retos Web Alojados (Docker / Railway / VPS)"]
@@ -25,11 +25,11 @@ flowchart LR
 
 | Componente | Ubicacion | Responsabilidad |
 |---|---|---|
-| Portal Web `eclipsec.cl` | Repositorio externo (Vercel) | Interfaz de usuario, SSR/SEO, autenticacion BFF hacia la API, tablero de retos y ranking |
-| Backend API | `backend/` (Railway) | Logica de dominio CTF, validacion de flags, puntuacion atomica, ranking SQL, administracion y registro de sesiones CLI |
+| Portal Web `eclipsec.cl` | `CTF-Academia_cyber/EclipSec-WebPage` (Vercel) | SPA React 19 + TypeScript + Vite; interfaz corporativa y Arena CTF con `src/styles/global.css` (60-30-10), componentes genericos, Skeletons, SEO semantico, autenticacion por cookies `HttpOnly` + `X-CSRF-Token` y validacion de flags via API |
+| Backend API | `academiahacking_ucncqbo/backend/` (Railway) | Logica de dominio CTF, validacion HMAC-SHA256 de flags, puntuacion atomica, ranking SQL unificado, administracion RBAC, revocacion de tokens y registro de sesiones CLI |
 | Base de Datos | PostgreSQL (Railway) / SQLite (Local) | Persistencia gestionada mediante migraciones Alembic |
-| Nodos de Retos Alojados | `docker/` | Entornos web vulnerables (`web-001` a `web-011`) servidos como contenedores |
-| `eclipsecCLI` | Herramienta externa | Descarga retos locales desde `CHALLENGES_REPOSITORY` y orquesta su ejecucion en el Docker del jugador |
+| Nodos de Retos Alojados | `academiahacking_ucncqbo/docker/` | Entornos web vulnerables (`web-001` a `web-011`) endurecidos con aislamiento non-root / `setpriv` y UI compartida `docker/shared/` |
+| `eclipsec-cli` | `CTF-Academia_cyber/eclipsec-cli` | CLI Python (`Click`) con configuracion UTF-8 multi-SO, validacion tar/symlink segura, revocacion remota en `auth logout`, soporte de retos locales y `target_url` alojados |
 
 ---
 
@@ -169,21 +169,19 @@ erDiagram
 
 ```mermaid
 sequenceDiagram
-    participant Browser as "Navegador (eclipsec.cl)"
-    participant BFF as "Next.js BFF (Server-Side)"
+    participant Browser as "Navegador (EclipSec-WebPage)"
     participant API as "FastAPI Backend"
     participant DB as "Base de Datos"
 
-    Browser->>BFF: "POST /api/session/login (credenciales)"
-    BFF->>API: "POST /api/v1/auth/session/login o /login"
+    Browser->>API: "POST /api/v1/auth/session/login o /api/ctf-academy (credentials: include)"
     API->>DB: "SELECT user + verify_password (bcrypt)"
     DB-->>API: "Usuario valido"
-    API-->>BFF: "Set-Cookie HttpOnly (eclipsec_session) + eclipsec_csrf"
-    BFF-->>Browser: "Set-Cookie HttpOnly, Secure, SameSite=Lax (sin token en body)"
-    Browser->>BFF: "POST /api/challenges/submit (cookie + X-CSRF-Token)"
-    BFF->>API: "POST /api/v1/challenges/slug/submit"
-    API-->>BFF: "FlagSubmissionResponse"
-    BFF-->>Browser: "JSON de respuesta seguro"
+    API-->>Browser: "Set-Cookie HttpOnly (eclipsec_session) + eclipsec_csrf (sin token en JSON)"
+    Browser->>API: "POST /api/v1/challenges/{slug}/submit (Cookie HttpOnly + cabecera X-CSRF-Token)"
+    API-->>Browser: "FlagSubmissionResponse"
+    Browser->>API: "POST /api/ctf-academy logout o /api/v1/auth/session/logout (+ X-CSRF-Token)"
+    API->>DB: "INSERT revoked_tokens (jti)"
+    API-->>Browser: "Clear cookies de sesion y CSRF"
 ```
 
 ### Flujo B: Ciclo de Vida de Retos Locales con `eclipsecCLI`
@@ -225,7 +223,7 @@ sequenceDiagram
 | ID | Decision | Estado | Justificacion |
 |---|---|---|---|
 | **ADR-001** | Modelo hibrido de retos: web alojados (`target_url`) + locales descargables via CLI (`repository`, `path`) | Vigente | Permite ejecutar retos pesados o sensibles en el Docker local del participante sin consumir CPU/memoria del servidor API en Railway. |
-| **ADR-002** | Autenticacion web sin tokens en navegador (cookies `HttpOnly` + CSRF + BFF) separada de tokens CLI | Vigente (Fase 3) | Evita exponer JWTs en el inspector de red del navegador o en `localStorage`, mitigando robo de sesion por XSS y soportando revocacion via `revoked_tokens`. |
+| **ADR-002** | Autenticacion web sin tokens en navegador (cookies `HttpOnly` + CSRF) separada de tokens CLI | Implementada (Fases 3 y 6) | Evita exponer JWTs en el inspector de red del navegador o en `localStorage`, mitigando robo de sesion por XSS y soportando revocacion via `revoked_tokens`. |
 | **ADR-003** | Adopcion de Alembic, seeding idempotente y patron Repository con DI | Implementada (Fase 4) | Reemplaza parches DDL ad-hoc por migraciones versionadas, desacopla routers de SQLAlchemy y asegura sincronizacion incremental no destructiva de `seed.py`. |
 | **ADR-004** | Aislamiento estricto por contenedor en lugar de entorno monolitico con consola root | Implementada (Fases 2 y 5) | `ttyd` y variables globales removidos en Fase 2; contenedores standalone `non-root`, `read_only`, `cap_drop: ALL`, limites de recursos y UI semantica `global.css` aplicados en Fase 5 junto a `setpriv` en monolitico. |
-| **ADR-005** | Encapsulacion y retiro gradual de `POST /api/ctf-academy` | En progreso (Fases 4-6) | Logica movida a `CtfAcademyService` reutilizando `AuthService`, `ChallengeService` y ranking SQL unificado previo a su retiro tras paridad completa con el frontend. |
+| **ADR-005** | Encapsulacion de `POST /api/ctf-academy` con cookies `HttpOnly` y paridad REST `v1` en frontend/CLI | Implementada (Fases 4 y 6) | `CtfAcademyService` reutiliza `AuthService`, `ChallengeService` y ranking SQL unificado mientras `EclipSec-WebPage` y `eclipsec-cli` validan flags y perfiles directamente sobre `/api/v1/*`. |

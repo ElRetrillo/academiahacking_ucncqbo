@@ -212,9 +212,11 @@ Este endpoint permanece programado para retiro controlado tras completar la inte
 
 ---
 
-## 8. Patron de Cliente Seguro para Frontend Next.js (BFF)
+## 8. Patron de Cliente Seguro para Frontend Web (`HttpOnly` + CSRF / BFF)
 
-Ejemplo de cliente del lado del servidor Next.js (Route Handler / Server Action) donde las credenciales y tokens nunca se exponen en `localStorage` ni al navegador:
+En `EclipSec-WebPage/src/lib/api.ts`, el cliente browser autentica mediante cookies `HttpOnly` (`credentials: 'include'`) e inyecta automaticamente la cabecera `X-CSRF-Token` leida desde `eclipsec_csrf` en peticiones mutadoras (`POST`, `PUT`, `PATCH`, `DELETE`), eliminando cualquier token JWT en `localStorage` o cabeceras `Authorization: Bearer`.
+
+Para arquitecturas con proxy SSR (ej. Next.js Route Handlers / Server Actions), puede utilizarse adicionalmente un servidor BFF:
 
 ```typescript
 import { cookies } from 'next/headers';
