@@ -1,7 +1,15 @@
+import html
+import os
 from pathlib import Path
+
 from flask import Flask, request
+from waitress import serve
+
+from ui import register_challenge_ui, render_page
 
 app = Flask(__name__)
+register_challenge_ui(app)
+
 FLAG_PATH = Path(__file__).resolve().parent / ".flag"
 
 
@@ -11,20 +19,41 @@ def read_flag() -> str:
     return ""
 
 
-@app.route('/')
+@app.route("/")
 def index():
-    ua = request.headers.get('User-Agent', '')
-    forwarded_for = request.headers.get('X-Forwarded-For', '')
-    client_ip = forwarded_for.split(',')[0].strip() if forwarded_for else (request.remote_addr or '')
+    ua = request.headers.get("User-Agent", "")
+    forwarded_for = request.headers.get("X-Forwarded-For", "")
+    client_ip = forwarded_for.split(",")[0].strip() if forwarded_for else (request.remote_addr or "")
 
-    if 'SecureBrowser1.0' not in ua:
-        return '<html><body style="background:#1a1a2e;color:#e94560;font-family:sans-serif;text-align:center;padding:50px;"><h1>Access Denied</h1><p>Only SecureBrowser1.0 is allowed.</p></body></html>'
+    if "SecureBrowser1.0" not in ua:
+        body = '<p class="ctf-alert ctf-alert--error">Acceso denegado: solo se permite SecureBrowser1.0.</p>'
+        return render_page(
+            title="Acceso Denegado",
+            heading="Control de Acceso",
+            subtitle="Validacion estricta de cabeceras HTTP.",
+            badge="Gateway",
+            body_html=body,
+        )
 
-    if client_ip != '127.0.0.1':
-        return '<html><body style="background:#1a1a2e;color:#e94560;font-family:sans-serif;text-align:center;padding:50px;"><h1>Access Denied</h1><p>Only local connections (127.0.0.1) are allowed.</p></body></html>'
+    if client_ip != "127.0.0.1":
+        body = '<p class="ctf-alert ctf-alert--error">Acceso denegado: solo conexiones locales (127.0.0.1).</p>'
+        return render_page(
+            title="Acceso Denegado",
+            heading="Control de Acceso",
+            subtitle="Validacion estricta de cabeceras HTTP.",
+            badge="Gateway",
+            body_html=body,
+        )
 
-    return f'<html><body style="background:#1a1a2e;color:#e94560;font-family:sans-serif;text-align:center;padding:50px;"><h1>Access Granted!</h1><p>{read_flag()}</p></body></html>'
+    body = f'<p class="ctf-alert ctf-alert--success">Acceso concedido: {html.escape(read_flag())}</p>'
+    return render_page(
+        title="Acceso Concedido",
+        heading="Panel Interno Verificado",
+        subtitle="Validacion superada correctamente.",
+        badge="Gateway",
+        body_html=body,
+    )
 
 
-if __name__ == '__main__':
-    app.run(host='127.0.0.1', port=8000)
+if __name__ == "__main__":
+    serve(app, host=os.environ.get("HOST", "0.0.0.0"), port=int(os.environ.get("PORT", "8000")), threads=4)

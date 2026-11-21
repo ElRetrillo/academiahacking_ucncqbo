@@ -1,7 +1,14 @@
+import os
 from pathlib import Path
-from flask import Flask
+
+from flask import Flask, Response
+from waitress import serve
+
+from ui import register_challenge_ui, render_page
 
 app = Flask(__name__)
+register_challenge_ui(app)
+
 FLAG_PATH = Path(__file__).resolve().parent / ".flag"
 
 
@@ -11,24 +18,27 @@ def read_flag() -> str:
     return ""
 
 
-@app.route('/')
+@app.route("/")
 def index():
-    return '''
-    <html><body style="background:#1a1a2e;color:#e94560;font-family:sans-serif;text-align:center;padding:50px;">
-    <h1>Secure Login System</h1>
-    <p>Everything is secure here. Definitely no backup files left on the server.</p>
-    </body></html>
-    '''
+    body = '<p class="ctf-muted">Sistema endurecido sin copias de respaldo expuestas en produccion.</p>'
+    return render_page(
+        title="Sistema Seguro",
+        heading="Sistema de Autenticacion",
+        subtitle="Despliegue limpio en produccion.",
+        badge="Source Audit",
+        body_html=body,
+    )
 
 
-@app.route('/index.bak')
+@app.route("/index.bak")
 def bak():
-    return f'''
-# Backup file
-def login():
-    password = "{read_flag()}"
-'''
+    content = (
+        "# Backup file\n"
+        "def login():\n"
+        f'    password = "{read_flag()}"\n'
+    )
+    return Response(content, mimetype="text/plain; charset=utf-8")
 
 
-if __name__ == '__main__':
-    app.run(host='127.0.0.1', port=8000)
+if __name__ == "__main__":
+    serve(app, host=os.environ.get("HOST", "0.0.0.0"), port=int(os.environ.get("PORT", "8000")), threads=4)
