@@ -29,8 +29,9 @@ El portal web frontend (`eclipsec.cl` en Vercel), el cliente CLI (`eclipsecCLI`)
 | Routers API (`backend/app/api/v1/`) | 6 routers (`auth.py`, `challenges.py`, `leaderboard.py`, `users.py`, `admin.py`, `ctf_academy.py`) | Routers delgados sin acceso directo a SQLAlchemy, protegidos con cookies `HttpOnly`, CSRF y rate limiting |
 | Pruebas (`backend/tests/`) | 9 suites (`test_admin.py`, `test_auth.py`, `test_challenges.py`, `test_instances.py`, `test_leaderboard.py`, `test_migrations.py`, `test_security_hardening.py`, `test_seed_and_health.py`, `test_users.py`) | Ejecutadas con `pytest -v` bajo `Python 3.13.14` (`win_amd64`) |
 | Retos sembrados (`backend/seed.py`) | 12 retos (`web-001`..`web-011` + `web-sqli-001`) | Sincronizacion idempotente no destructiva, almacenamiento `[REDACTED]` + `HMAC-SHA256` y fail-fast en produccion |
-| Contenedores individuales (`docker/challenge-web-*`) | 11 carpetas (`001` a `011`) | Dockerfiles reparados, `ttyd` removido, usuario no-root `ctf` y flags por `ARG` |
-| Contenedor monolitico (`docker/monolithic/`) | `Dockerfile`, `start.sh`, `web-001`..`web-011` | Aislado por UID (`web002`..`web011`), sin `ttyd` ni `ENV FLAG=` global |
+| Contenedores individuales (`docker/challenge-web-*`) | 11 carpetas (`001` a `011`) + `docker/shared/` | Imagenes `nginx:1.27-alpine` (`001`) y `python:3.12-slim` + `waitress` (`002`..`011`), `USER` non-root, `read_only: true`, `cap_drop: ALL`, limites de CPU/RAM/PIDs, `global.css` 60-30-10 y HTML5 con `noindex` |
+| Contenedor monolitico (`docker/monolithic/`) | `Dockerfile`, `start.sh`, `web-index`, `web-001`..`web-011` | `python:3.12-slim` + `waitress`, aislamiento por UID via `setpriv` (`web002`..`web011`), puerto dinamico `$PORT`, sin `ttyd` ni `ENV FLAG=` global, y UI unificada |
+| Pruebas E2E de retos (`docker/tests/`) | `test_challenges_e2e.py` | Valida paridad de generadores, endurecimiento Docker/Compose, anti-bypass, explotacion intencional de los 11 retos y estandares UI/HTML |
 | Metadatos locales en Git | `.atl/` | Eliminado de Git e ignorado en `.gitignore` (Fase 2) |
 
 ---
@@ -39,10 +40,9 @@ El portal web frontend (`eclipsec.cl` en Vercel), el cliente CLI (`eclipsecCLI`)
 
 ### Severidad Critica
 
-#### SEC-01: [MITIGADO PARCIALMENTE] Aislamiento entre retos en contenedores CTF
-- **Ubicacion:** [docker/monolithic/Dockerfile](../docker/monolithic/Dockerfile), [docker/monolithic/start.sh](../docker/monolithic/start.sh), [docker/challenge-web-001/Dockerfile](../docker/challenge-web-001/Dockerfile)
-- **Estado actual:** Se elimino `ttyd` y la shell `root` de todos los contenedores victima, se elimino `ENV FLAG=` global, se asignaron UIDs dedicados (`web002`..`web011` en monolitico y `ctf` en standalone) con permisos `0550`/`0440` (`0700` en `web-006` para SQLite), se retiro `/app/web-005/flag.txt` para forzar path traversal en LFI y se parametrizaron las flags mediante `ARG`.
-- **Pendiente (Fase 5):** Anadir limites de recursos (`mem_limit`, `cpus`, `pids_limit`) y rootfs de solo lectura donde aplique, mas estandar UI/HTML con `global.css` 60-30-10.
+#### SEC-01: [RESUELTO en Fases 2 y 5] Aislamiento y limites de recursos en contenedores CTF
+- **Ubicacion:** [docker/create_challenges.py](../docker/create_challenges.py), [docker/docker-compose.yml](../docker/docker-compose.yml), [docker/build_monolithic.py](../docker/build_monolithic.py), [docker/monolithic/Dockerfile](../docker/monolithic/Dockerfile)
+- **Estado actual:** Eliminados `ttyd`, shells `root` y `ENV FLAG=` global; todos los servicios standalone (`web-001` en `nginx:1.27-alpine` y `web-002`..`011` en `python:3.12-slim` + `waitress`) ejecutan `100%` como `non-root` (`USER nginx` / `USER ctf`), `read_only: true`, `tmpfs` acotado, `no-new-privileges:true`, `cap_drop: ALL` (`NET_RAW` unicamente en `web-004`) y limites estrictos (`mem_limit`, `memswap_limit`, `cpus`, `pids_limit`). El nodo monolitico aisla procesos mediante `setpriv` por UID (`web002`..`web011`) con permisos `0550`/`0440` (`0700` en `web-006` para SQLite privado) y sin atajos hacia `/flag.txt` en `web-005`.
 
 #### SEC-02: [RESUELTO en Fase 3] Flags en base de datos y externalizacion de secretos
 - **Ubicacion:** [backend/seed.py](../backend/seed.py), [backend/app/services/security.py](../backend/app/services/security.py), [backend/app/services/challenge_service.py](../backend/app/services/challenge_service.py)
@@ -114,8 +114,8 @@ El portal web frontend (`eclipsec.cl` en Vercel), el cliente CLI (`eclipsecCLI`)
    - Actualizaciones atomicas SQL (`solves_count + 1`, `score + points`) y manejo de `IntegrityError` en `record_correct_solve`, `register_user` y `admin_create_challenge`.
    - `@computed_field` de Pydantic v2 en [backend/app/schemas/user.py](../backend/app/schemas/user.py) elimina la duplicacion manual de propiedades `camelCase` en servicios.
    - Configuracion [backend/pyproject.toml](../backend/pyproject.toml) agregada y finales de linea LF normalizados en todo el backend.
-6. **Pendiente (Fase 5) — Limites en contenedores e interfaces HTML de retos (`docker/`)**:
-   - Agregar limites de recursos y estandarizar HTML/CSS de los 11 retos web con `global.css` 60-30-10, HTML semantico y `<meta name="robots" content="noindex, nofollow">` manteniendo intactas todas las vulnerabilidades intencionales.
+6. **[RESUELTO en Fase 5] Endurecimiento de contenedores e interfaces HTML/CSS de retos (`docker/`)**:
+   - Aplicados limites de CPU/RAM/PIDs, `read_only: true`, `cap_drop: ALL`, `no-new-privileges:true` y estandarizado el catalogo visual mediante [docker/shared/global.css](../docker/shared/global.css) (60-30-10) y [docker/shared/ui.py](../docker/shared/ui.py) (HTML5 semantico, `<meta name="robots" content="noindex, nofollow">`, cabeceras `X-Robots-Tag`, cero estilos inline) conservando intactas las vulnerabilidades intencionales de los 11 retos, validado con [docker/tests/test_challenges_e2e.py](../docker/tests/test_challenges_e2e.py).
 
 ---
 
@@ -127,5 +127,5 @@ El portal web frontend (`eclipsec.cl` en Vercel), el cliente CLI (`eclipsecCLI`)
 | **Fase 2 (Completada)** | Higiene, Docker anti-bypass y portabilidad | Retiro de `.atl/`; `.gitattributes` LF y rutas portables multi-SO en `backend/`; remocion de `ttyd`, aislamiento por UID, correccion `web-005`/`006`/`008`/`010`, flags por `ARG`, alineacion Railway y `.env.example` ficticio. |
 | **Fase 3 (Completada)** | Endurecimiento DevSecOps del Backend | Validacion fail-fast de secretos; eliminacion de auto-admin; cookies `HttpOnly` + CSRF y revocacion `jti`; CORS estricto y cabeceras HTTP; rate limiting; ocultamiento de PII publica; `HMAC-SHA256` en flags/envios; `backend/Dockerfile` non-root multi-stage con `$PORT`. |
 | **Fase 4 (Completada)** | Correccion de errores, Clean Code, SOLID, Alembic y pruebas | Capa Repository (`Protocol`) + DI (`Depends`) sin SQLAlchemy en routers; ranking SQL unificado; Alembic + indices compuestos + `PRAGMA foreign_keys=ON`; updates atomicos anti-carrera; proteccion bcrypt 72B, `TRUSTED_PROXY_COUNT` y rate limiter acotado; `GET /health` con check de BD; seed idempotente; 9 suites `pytest` y Alembic validados. |
-| **Fase 5 (Siguiente)** | Contenedores dedicados con limites y estandar UI/HTML | Limites de recursos (`mem_limit`, `cpus`, `pids_limit`) y rootfs read-only en `docker/`; `global.css` 60-30-10 y HTML semantico con `noindex` en las interfaces web de retos sin comprometer la vulnerabilidad intencional de cada ejercicio. |
-| **Fase 6** | Integracion integral Frontend (`eclipsec.cl`) y CLI | Verificacion extremo a extremo con frontend Next.js (BFF sin tokens en navegador, componentes genericos, skeletons, SEO, tipografia) y `eclipsecCLI`. |
+| **Fase 5 (Completada)** | Contenedores dedicados con limites y estandar UI/HTML | Imagenes dedicadas `non-root` (`nginx:1.27-alpine`, `python:3.12-slim` + `waitress`), `read_only: true`, `cap_drop: ALL`, `mem_limit`/`memswap_limit`/`cpus`/`pids_limit`; [global.css](../docker/shared/global.css) 60-30-10 y HTML5 semantico con `noindex` en las 11 interfaces web sin romper su vulnerabilidad intencional; paridad monolitico con `setpriv` y suite E2E en verde. |
+| **Fase 6 (Siguiente)** | Integracion integral Frontend (`eclipsec.cl`) y CLI | Verificacion extremo a extremo con frontend Next.js (BFF sin tokens en navegador, componentes genericos, skeletons, SEO, tipografia) y `eclipsecCLI`. |

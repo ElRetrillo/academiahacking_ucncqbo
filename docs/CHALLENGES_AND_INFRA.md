@@ -29,19 +29,24 @@ Por seguridad, ninguna flag real se transcribe en la documentacion (ver politica
 
 ### 2.1 Docker Compose (Entorno Local o VPS Dedicado)
 
-Definido en [docker/docker-compose.yml](../docker/docker-compose.yml). Levanta cada reto `web-001` a `web-011` en contenedores separados sin privilegios (`ctf`), sin terminales interactivas dentro de los objetivos y parametrizando las flags mediante build-args (`FLAG_WEB_001` a `FLAG_WEB_011`):
+Definido en [docker/docker-compose.yml](../docker/docker-compose.yml) y generado de forma idempotente desde [docker/create_challenges.py](../docker/create_challenges.py). Cada reto `web-001` a `web-011` se ejecuta en su propio contenedor endurecido y sin consola interactiva:
 
-- Aplicaciones Web: `8001` a `8011` (internamente puerto `80` tras Nginx + Flask).
-- Si se requiere consola web para estudiantes, debe desplegarse en un contenedor atacante aislado aparte, nunca dentro de los contenedores victima.
+- **Imagenes y servidores**: `web-001` sobre `nginx:1.27-alpine` (`USER nginx`, puerto interno `8080` mapeado a `8001`); `web-002` a `web-011` sobre `python:3.12-slim` + `waitress` (`USER ctf`, puerto interno `8000` mapeado a `8002..8011`).
+- **Aislamiento y limites de recursos**: `read_only: true`, `/tmp:rw,noexec,nosuid,size=16m` (`web-006` persiste SQLite en `/tmp/users.db` via `CTF_DB_PATH`), `security_opt: ["no-new-privileges:true"]`, `cap_drop: ["ALL"]` (`cap_add: ["NET_RAW"]` unicamente en `web-004`), `mem_limit`/`memswap_limit` (`64m` en `001`, `128m` en `002..011`), `cpus` (`0.25` / `0.50`) y `pids_limit` (`32` / `64`).
+- **Parametrizacion y anti-bypass**: Flags inyectadas en build-time mediante `FLAG_WEB_001` a `FLAG_WEB_011`, manteniendo unicamente las vulnerabilidades intencionales (ej. `web-005` ubica `/flag.txt` fuera de `/app`).
+- **UI y no indexacion**: Todas las vistas utilizan [docker/shared/global.css](../docker/shared/global.css) (tokens 60-30-10) y [docker/shared/ui.py](../docker/shared/ui.py) (HTML5 semantico, `<meta name="robots" content="noindex, nofollow">`, cabeceras `X-Robots-Tag`, `nosniff`, `no-referrer`).
 
 ### 2.2 Contenedor Monolitico con Nginx (Railway PaaS)
 
-Definido en [docker/monolithic/](../docker/monolithic/Dockerfile). Dado que Railway expone un unico dominio por servicio en puertos `80`/`443`, este nodo enruta mediante Nginx bajo subrutas `/web-001/` a `/web-011/`.
+Definido en [docker/monolithic/](../docker/monolithic/Dockerfile) y generado desde [docker/build_monolithic.py](../docker/build_monolithic.py). Dado que Railway expone un unico dominio por servicio con puerto dinamico `$PORT`, Nginx enruta mediante subrutas `/web-001/` a `/web-011/` junto a un indice semantico en `/`.
 
 **Aislamiento y Configuracion Actual:**
-- Cada servicio Flask se ejecuta bajo un usuario dedicado sin privilegios (`web002` a `web011`), sin `ttyd`, sin `ENV FLAG=` global y con permisos `0550`/`0440` (`0700` en `web-006` para SQLite) para impedir movimiento lateral o lectura de flags de otros retos.
+- Basado en `python:3.12-slim` + `waitress` + `nginx` con portabilidad para `${PORT:-80}` y cabeceras `X-Robots-Tag: noindex, nofollow`.
+- Cada servicio Flask se ejecuta aislado mediante `setpriv` bajo un UID dedicado sin privilegios (`web002` a `web011`), sin `ttyd`, sin `ENV FLAG=` global y con permisos `0550`/`0440` (`0700` en `/app/web-006` para SQLite privado) para impedir movimiento lateral o lectura de flags de otros retos.
 - Las flags se inyectan en build-time via `ARG FLAG_WEB_001`..`ARG FLAG_WEB_011`, manteniendo los valores por defecto solo para desarrollo local y permitiendo sobrescribirlos en despliegue real.
-- En Fase 5 se agregaran limites de recursos (`mem_limit`, `cpus`, `pids_limit`) y rootfs de solo lectura donde aplique.
+
+**Pruebas Automatizadas de Contenedores y Retos:**
+- La suite [docker/tests/test_challenges_e2e.py](../docker/tests/test_challenges_e2e.py) verifica la paridad byte a byte de los generadores, las directivas de seguridad en Dockerfiles/`docker-compose.yml`, el cumplimiento UI/HTML (`global.css`, `noindex`, landmarks, cero estilos inline), la ausencia de fugas sin explotacion y el exito de los 11 exploits pedagogicos.
 
 ### 2.3 Retos Locales mediante `eclipsecCLI`
 
